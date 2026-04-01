@@ -1,0 +1,68 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+
+class FormSubmission extends Model
+{
+    use HasFactory;
+
+    /**
+     * The attributes that are mass assignable.
+     *
+     * @var list<string>
+     */
+    protected $fillable = [
+        'form_id',
+        'user_id',
+        'form_data',
+        'current_status',
+        'current_step',
+        'pdf_path',
+        'rejection_reason',
+        'created_by',
+    ];
+
+    /**
+     * The attributes that should be cast.
+     *
+     * @return array<string, string>
+     */
+    protected $casts = [
+        'form_data' => 'array',
+    ];
+
+    /**
+     * Get the form associated with this submission.
+     */
+    public function form()
+    {
+        return $this->belongsTo(Form::class);
+    }
+
+    /**
+     * Get the user who submitted this form.
+     */
+    public function user()
+    {
+        return $this->belongsTo(User::class, 'user_id');
+    }
+
+    /**
+     * Get the approval steps for this submission.
+     */
+    public function approvalSteps()
+    {
+        return $this->hasMany(ApprovalStep::class, 'form_submission_id');
+    }
+
+    /**
+     * Get the creator of this submission.
+     */
+    public function creator()
+    {
+        return $this->belongsTo(User::class, 'created_by');
+    }
+}

@@ -1,0 +1,212 @@
+@import 'tailwindcss';
+
+@source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
+@source '../../storage/framework/views/*.php';
+@source '../**/*.blade.php';
+@source '../**/*.js';
+
+@theme {
+    --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
+        'Segoe UI Symbol', 'Noto Color Emoji';
+    --color-primary-50: #fffaef;
+    --color-primary-100: #f9edcb;
+    --color-primary-200: #f2daa0;
+    --color-primary-300: #e9c36f;
+    --color-primary-400: #dca646;
+    --color-primary-500: #c7911d;
+    --color-primary-600: #a86f10;
+    --color-primary-700: #85540b;
+    --color-primary-800: #6a420c;
+    --color-primary-900: #56350d;
+    --color-primary-950: #321c05;
+    --color-secondary-50: #faf7f2;
+    --color-secondary-100: #f2ebe0;
+    --color-secondary-200: #e4d9c7;
+    --color-secondary-300: #d0bfa6;
+    --color-secondary-400: #b79b79;
+    --color-secondary-500: #987754;
+    --color-secondary-600: #7a5e42;
+    --color-secondary-700: #614a34;
+    --color-secondary-800: #4f3b2a;
+    --color-secondary-900: #39291d;
+    --color-success-50: #f0fdf4;
+    --color-success-100: #dcfce7;
+    --color-success-600: #16a34a;
+    --color-success-700: #15803d;
+    --color-danger-50: #fef2f2;
+    --color-danger-100: #fee2e2;
+    --color-danger-600: #dc2626;
+    --color-danger-700: #b91c1c;
+}
+
+@layer base {
+  body {
+    color: var(--color-secondary-900);
+    background-color: var(--color-secondary-50);
+  }
+}
+
+@layer components {
+  .brand-canvas {
+    background:
+      radial-gradient(circle at top left, rgba(242, 218, 160, 0.38), transparent 30%),
+      radial-gradient(circle at right 15%, rgba(199, 145, 29, 0.14), transparent 22%),
+      linear-gradient(180deg, #fffdf9 0%, #f7f0e5 100%);
+  }
+
+  .brand-surface {
+    border: 1px solid rgba(199, 145, 29, 0.16);
+    background: rgba(255, 255, 255, 0.94);
+    border-radius: 1.75rem;
+    box-shadow: 0 24px 70px rgba(91, 55, 13, 0.12);
+    backdrop-filter: blur(10px);
+  }
+
+  .brand-muted-surface {
+    border: 1px solid rgba(199, 145, 29, 0.14);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(255, 250, 239, 0.94));
+    border-radius: 1.75rem;
+    box-shadow: 0 18px 48px rgba(91, 55, 13, 0.1);
+    backdrop-filter: blur(10px);
+  }
+
+  .brand-link {
+    @apply font-medium text-primary-700 transition-colors duration-200 hover:text-primary-800;
+  }
+
+  .form-builder-field {
+    @apply p-4 transition-all duration-300 ease-in-out;
+    border: 1px solid rgba(122, 94, 66, 0.14);
+    border-radius: 1.25rem;
+    background: rgba(255, 255, 255, 0.94);
+    box-shadow: 0 12px 28px rgba(91, 55, 13, 0.06);
+  }
+
+  .form-builder-field:hover {
+    @apply border-primary-300;
+    box-shadow: 0 18px 34px rgba(91, 55, 13, 0.11);
+  }
+
+  .form-builder-field.selected {
+    @apply border-primary-400 ring-4 ring-primary-100;
+  }
+
+  .card {
+    border: 1px solid rgba(199, 145, 29, 0.14);
+    background: rgba(255, 255, 255, 0.94);
+    border-radius: 1.5rem;
+    box-shadow: 0 18px 48px rgba(91, 55, 13, 0.1);
+  }
+
+  .btn-primary {
+    @apply text-white font-semibold transition-all duration-200;
+    padding: 0.75rem 1.1rem;
+    border-radius: 0.95rem;
+    background: linear-gradient(135deg, var(--color-primary-500), var(--color-primary-700));
+    box-shadow: 0 14px 30px rgba(133, 84, 11, 0.22);
+  }
+
+  .btn-secondary {
+    @apply font-medium text-secondary-700 transition-all duration-200;
+    padding: 0.75rem 1.1rem;
+    border-radius: 0.95rem;
+    border: 1px solid rgba(199, 145, 29, 0.14);
+    background: rgba(255, 255, 255, 0.9);
+  }
+
+  .btn-danger {
+    @apply bg-danger-600 hover:bg-danger-700 text-white font-medium transition-colors duration-200;
+    padding: 0.75rem 1.1rem;
+    border-radius: 0.95rem;
+  }
+
+  .btn-success {
+    @apply bg-success-600 hover:bg-success-700 text-white font-medium transition-colors duration-200;
+    padding: 0.75rem 1.1rem;
+    border-radius: 0.95rem;
+  }
+
+  .input-field {
+    @apply w-full bg-white text-secondary-900 focus:outline-none transition-all duration-200;
+    padding: 0.85rem 1rem;
+    border: 1px solid rgba(122, 94, 66, 0.18);
+    border-radius: 1rem;
+  }
+
+  .select-field {
+    @apply w-full bg-white text-secondary-900 focus:outline-none transition-all duration-200;
+    padding: 0.85rem 1rem;
+    border: 1px solid rgba(122, 94, 66, 0.18);
+    border-radius: 1rem;
+  }
+
+  .status-badge {
+    @apply inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold;
+  }
+
+  .status-submitted {
+    @apply bg-primary-100 text-primary-800;
+  }
+
+  .status-pending {
+    @apply bg-yellow-100 text-yellow-800;
+  }
+
+  .status-approved {
+    @apply bg-green-100 text-green-800;
+  }
+
+  .status-rejected {
+    @apply bg-red-100 text-red-800;
+  }
+
+  .status-completed {
+    @apply bg-emerald-100 text-emerald-800;
+  }
+}
+
+.btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 18px 34px rgba(133, 84, 11, 0.28);
+}
+
+.btn-secondary:hover {
+  background: rgba(255, 250, 239, 0.96);
+  color: var(--color-primary-800);
+  border-color: rgba(199, 145, 29, 0.28);
+}
+
+.input-field:focus,
+.select-field:focus {
+  border-color: rgba(199, 145, 29, 0.55);
+  box-shadow: 0 0 0 4px rgba(242, 218, 160, 0.45);
+}
+
+/* Animation Classes */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+.slide-fade-enter-active {
+  transition: all 0.3s ease-out;
+}
+
+.slide-fade-leave-active {
+  transition: all 0.3s ease-in;
+}
+
+.slide-fade-enter-from {
+  transform: translateX(-10px);
+  opacity: 0;
+}
+
+.slide-fade-leave-to {
+  transform: translateX(10px);
+  opacity: 0;
+}
