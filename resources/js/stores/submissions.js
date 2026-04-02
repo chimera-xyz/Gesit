@@ -16,7 +16,13 @@ export const useSubmissionStore = defineStore('submissions', {
 
         getPendingSubmissions: (state) => {
             return state.submissions.filter(submission =>
-                ['submitted', 'pending_it', 'pending_director', 'pending_accounting'].includes(submission.current_status)
+                ['submitted', 'pending_it', 'pending_director', 'pending_accounting', 'pending_payment'].includes(submission.current_status)
+            );
+        },
+
+        getActionableSubmissions: (state) => {
+            return state.submissions.filter(submission =>
+                Array.isArray(submission.available_actions) && submission.available_actions.length > 0
             );
         },
 

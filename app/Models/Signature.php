@@ -16,7 +16,6 @@ class Signature extends Model
      */
     protected $fillable = [
         'user_id',
-        'approval_step_id',
         'signature_image',
         'signature_type',
         'signature_hash',
@@ -49,7 +48,7 @@ class Signature extends Model
      */
     public function approvalStep()
     {
-        return $this->belongsTo(ApprovalStep::class, 'approval_step_id');
+        return $this->hasOne(ApprovalStep::class, 'signature_id');
     }
 
     /**
@@ -59,7 +58,7 @@ class Signature extends Model
     {
         $data = [
             'user_id' => $this->user_id,
-            'approval_step_id' => $this->approval_step_id,
+            'approval_step_id' => $this->metadata['approval_step_id'] ?? null,
             'signature_type' => $this->signature_type,
             'signature_image' => $this->signature_image,
             'timestamp' => now()->toDateTimeString(),

@@ -27,10 +27,10 @@ class DatabaseSeeder extends Seeder
         ], [
             'name' => 'GESIT Admin',
             'password' => Hash::make('admin123'),
-            'department' => 'IT',
+            'department' => 'Management System',
             'employee_id' => 'ADM-001',
         ]);
-        $admin->syncRoles(['Admin', 'IT Staff']);
+        $admin->syncRoles(['Admin']);
 
         $employee = User::updateOrCreate([
             'email' => 'employee@gesit.com',
@@ -51,5 +51,25 @@ class DatabaseSeeder extends Seeder
             'employee_id' => 'IT-001',
         ]);
         $itStaff->syncRoles(['IT Staff']);
+
+        $director = User::updateOrCreate([
+            'email' => 'director@gesit.com',
+        ], [
+            'name' => 'GESIT Operational Director',
+            'password' => Hash::make('director123'),
+            'department' => 'Operational',
+            'employee_id' => 'DIR-001',
+        ]);
+        $director->syncRoles(['Operational Director']);
+
+        $accounting = User::updateOrCreate([
+            'email' => 'accounting@gesit.com',
+        ], [
+            'name' => 'GESIT Accounting',
+            'password' => Hash::make('accounting123'),
+            'department' => 'Finance',
+            'employee_id' => 'ACC-001',
+        ]);
+        $accounting->syncRoles(['Accounting']);
     }
 }

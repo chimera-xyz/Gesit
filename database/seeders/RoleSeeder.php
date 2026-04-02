@@ -6,6 +6,7 @@ use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\Models\Permission;
+use Spatie\Permission\PermissionRegistrar;
 
 class RoleSeeder extends Seeder
 {
@@ -14,6 +15,8 @@ class RoleSeeder extends Seeder
      */
     public function run(): void
     {
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+
         // Create roles
         $roles = [
             [
@@ -44,6 +47,7 @@ class RoleSeeder extends Seeder
 
         // Create permissions
         $permissions = [
+            ['name' => 'view forms', 'guard_name' => 'web'],
             ['name' => 'create forms', 'guard_name' => 'web'],
             ['name' => 'edit forms', 'guard_name' => 'web'],
             ['name' => 'delete forms', 'guard_name' => 'web'],
@@ -64,16 +68,33 @@ class RoleSeeder extends Seeder
         $adminRole = Role::where('name', 'Admin')->first();
         $adminRole->syncPermissions(Permission::all());
 
+        $basePermissions = ['view forms', 'submit forms', 'view submissions'];
+
         $itRole = Role::where('name', 'IT Staff')->first();
-        $itRole->syncPermissions(['approve forms', 'reject forms', 'view submissions', 'create signatures']);
+        $itRole->syncPermissions([
+            ...$basePermissions,
+            'approve forms',
+            'reject forms',
+            'create signatures',
+        ]);
 
         $directorRole = Role::where('name', 'Operational Director')->first();
-        $directorRole->syncPermissions(['approve forms', 'reject forms', 'view submissions', 'create signatures']);
+        $directorRole->syncPermissions([
+            ...$basePermissions,
+            'approve forms',
+            'reject forms',
+            'create signatures',
+        ]);
 
         $accountingRole = Role::where('name', 'Accounting')->first();
-        $accountingRole->syncPermissions(['approve forms', 'reject forms', 'view submissions', 'create signatures']);
+        $accountingRole->syncPermissions([
+            ...$basePermissions,
+            'approve forms',
+            'reject forms',
+            'create signatures',
+        ]);
 
         $employeeRole = Role::where('name', 'Employee')->first();
-        $employeeRole->syncPermissions(['submit forms', 'view submissions']);
+        $employeeRole->syncPermissions($basePermissions);
     }
 }

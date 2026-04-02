@@ -1,464 +1,264 @@
+@php
+    $imageToDataUri = function (?string $path): ?string {
+        if (!$path || !file_exists($path)) {
+            return null;
+        }
+
+        $mime = mime_content_type($path) ?: 'image/png';
+
+        return 'data:' . $mime . ';base64,' . base64_encode(file_get_contents($path));
+    };
+
+    $signatureToDataUri = function ($signature) use ($imageToDataUri): ?string {
+        if (!$signature || !$signature->signature_image) {
+            return null;
+        }
+
+        $path = \Illuminate\Support\Facades\Storage::disk('public')->path($signature->signature_image);
+
+        return $imageToDataUri($path);
+    };
+
+    $resolveFormValue = function (array $data, array $fields, array $preferredIds, array $labelKeywords, mixed $fallback = null): mixed {
+        foreach ($preferredIds as $id) {
+            if (array_key_exists($id, $data) && $data[$id] !== null && $data[$id] !== '') {
+                return $data[$id];
+            }
+        }
+
+        foreach ($fields as $field) {
+            $fieldId = $field['id'] ?? null;
+            $label = strtolower((string) ($field['label'] ?? ''));
+
+            if (!$fieldId || !array_key_exists($fieldId, $data)) {
+                continue;
+            }
+
+            foreach ($labelKeywords as $keyword) {
+                if (str_contains($label, strtolower($keyword)) && $data[$fieldId] !== null && $data[$fieldId] !== '') {
+                    return $data[$fieldId];
+                }
+            }
+        }
+
+        return $fallback;
+    };
+
+    $valueOrNull = function (mixed $value, string $prefix = ''): ?string {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        return $prefix . $value;
+    };
+
+    $formatDate = function (mixed $value, string $fallback = '-'): string {
+        if ($value === null || $value === '') {
+            return $fallback;
+        }
+
+        try {
+            return \Carbon\Carbon::parse($value)->format('d/m/Y');
+        } catch (\Throwable $exception) {
+            return is_string($value) ? $value : $fallback;
+        }
+    };
+
+    $formatLongDate = function (mixed $value, string $fallback = '-'): string {
+        if ($value === null || $value === '') {
+            return $fallback;
+        }
+
+        try {
+            return \Carbon\Carbon::parse($value)->locale('id')->translatedFormat('d F Y');
+        } catch (\Throwable $exception) {
+            return is_string($value) ? $value : $fallback;
+        }
+    };
+
+    $formatCurrencyIdr = fn (float $value): string => number_format($value, 0, ',', '.');
+
+    $formData = $submission->form_data ?? [];
+    $formFields = $submission->form?->form_config['fields'] ?? [];
+    $approvalSteps = $submission->approvalSteps->sortBy('step_number')->values();
+    $itStep = $approvalSteps->firstWhere('approver_role', 'IT Staff');
+    $directorStep = $approvalSteps->firstWhere('approver_role', 'Operational Director');
+    $accountingStep = $approvalSteps->where('approver_role', 'Accounting')->last();
+    $requestDate = $resolveFormValue($formData, $formFields, ['request_date'], ['tanggal pengajuan', 'tanggal request'], optional($submission->created_at)->toDateString());
+    $requiredDate = $resolveFormValue($formData, $formFields, ['needed_by_date'], ['required date', 'dibutuhkan sebelum'], $requestDate);
+    $paymentTerms = $resolveFormValue($formData, $formFields, ['payment_terms'], ['payment terms', 'metode pembayaran'], 'Transfer');
+    $quantity = (float) $resolveFormValue($formData, $formFields, ['quantity'], ['jumlah', 'qty'], 0);
+    $amount = (float) $resolveFormValue($formData, $formFields, ['estimated_cost'], ['estimasi biaya', 'harga', 'biaya'], 0);
+    $pricePerUnit = $quantity > 0 ? $amount / $quantity : $amount;
+    $requesterName = $resolveFormValue($formData, $formFields, ['employee_name'], ['nama pemohon', 'nama requester', 'request by'], $submission->user?->name ?? '-');
+    $requesterSection = $resolveFormValue($formData, $formFields, ['department'], ['departemen', 'section'], $submission->user?->department ?? '-');
+    $requestedPosition = $resolveFormValue($formData, $formFields, ['position'], ['jabatan', 'position'], null);
+    $requesterTitle = $submission->user?->roles
+        ?->pluck('name')
+        ?->reject(fn (string $role) => $role === 'Admin')
+        ?->implode(', ') ?: 'Employee';
+    $requesterTitle = $requestedPosition ?: $requesterTitle;
+    $requestByLine = trim(implode(' / ', array_filter([$requesterName, $requesterSection])));
+    $headerRequester = $requestedPosition
+        ?: ($requesterSection ?: $requesterTitle ?: $requesterName);
+    $itemName = (string) $resolveFormValue(
+        $formData,
+        $formFields,
+        ['item_name'],
+        ['nama barang', 'barang apa', 'barang'],
+        $resolveFormValue($formData, $formFields, ['item_type'], ['tipe barang', 'jenis barang', 'jenis'], '')
+    );
+    $specificationLines = array_filter([
+        $resolveFormValue($formData, $formFields, ['specifications'], ['spesifikasi'], null),
+        $valueOrNull($resolveFormValue($formData, $formFields, ['reason'], ['alasan'], null), 'Alasan: '),
+        $valueOrNull($resolveFormValue($formData, $formFields, ['urgency'], ['urgensi', 'priority'], null), 'Urgensi: '),
+        $valueOrNull($resolveFormValue($formData, $formFields, ['vendor_preference'], ['vendor', 'referensi'], null), 'Referensi: '),
+    ]);
+    $specificationText = implode("\n", $specificationLines);
+
+    $templateDataUri = $imageToDataUri($templateImagePath);
+    $itSignature = $signatureToDataUri(optional($itStep)->signature);
+    $directorSignature = $signatureToDataUri(optional($directorStep)->signature);
+    $accountingSignature = $signatureToDataUri(optional($accountingStep)->signature);
+
+    $itName = optional(optional($itStep)->approver)->name ?? '';
+    $directorName = optional(optional($directorStep)->approver)->name ?? '';
+    $accountingName = optional(optional($accountingStep)->approver)->name ?? '';
+
+    $displayRequestDate = $formatLongDate($requestDate, $formatDate($submission->created_at));
+    $displayRequiredDate = $formatLongDate($requiredDate, $displayRequestDate);
+    $displayQuantity = $quantity > 0 ? number_format($quantity, 0, ',', '.') : '';
+    $displayPrice = $amount > 0 ? $formatCurrencyIdr($pricePerUnit) : '';
+    $displayAmount = $amount > 0 ? $formatCurrencyIdr($amount) : '';
+    $displayTotal = $amount > 0 ? $formatCurrencyIdr($amount) : '';
+@endphp
 <!DOCTYPE html>
 <html lang="id">
 <head>
     <meta charset="UTF-8">
-    <title>GESIT - Form Submission</title>
+    <title>GESIT Requisition</title>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        @page {
+            margin: 0;
+            size: 595pt 842pt;
+        }
 
         body {
-            font-family: 'Inter', sans-serif;
             margin: 0;
-            padding: 0;
-            background-color: #f8f9fa;
+            font-family: "Courier New", Courier, monospace;
+            font-size: 8pt;
+            color: #111827;
         }
 
-        .container {
-            max-width: 800px;
-            margin: 20px auto;
-            background: white;
-            padding: 40px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        .page {
+            position: relative;
+            width: 595pt;
+            height: 842pt;
+            overflow: hidden;
         }
 
-        .header {
-            border-bottom: 2px solid #3b82f6;
-            padding-bottom: 20px;
-            margin-bottom: 30px;
+        .template-bg {
+            position: absolute;
+            inset: 0;
+            width: 595pt;
+            height: 842pt;
+            z-index: 0;
         }
 
-        .company-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 30px;
+        .field {
+            position: absolute;
+            z-index: 2;
+            line-height: 1.12;
+            white-space: pre-wrap;
+            word-break: break-word;
+            overflow: hidden;
         }
 
-        .company-name {
-            font-size: 28px;
+        .mask {
+            background: #fff;
+            padding: 0 1pt;
+        }
+
+        .value-bold {
             font-weight: 700;
-            color: #3b82f6;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
         }
 
-        .company-address {
-            font-size: 14px;
-            color: #64748b;
+        .value-sm {
+            font-size: 7.3pt;
         }
 
-        .document-title {
-            font-size: 18px;
-            font-weight: 600;
-            color: #1d4ed8;
-            text-transform: uppercase;
-            margin-bottom: 20px;
+        .value-md {
+            font-size: 8pt;
         }
 
-        .document-info {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 20px;
-            margin-bottom: 30px;
+        .value-lg {
+            font-size: 8.4pt;
         }
 
-        .info-item {
-            display: flex;
-            flex-direction: column;
-        }
-
-        .info-label {
-            font-size: 12px;
-            font-weight: 500;
-            color: #6b7280;
-            text-transform: uppercase;
-        }
-
-        .info-value {
-            font-size: 14px;
-            color: #374151;
-            font-weight: 400;
-        }
-
-        .section {
-            margin-bottom: 30px;
-        }
-
-        .section-title {
-            font-size: 16px;
-            font-weight: 600;
-            color: #3b82f6;
-            margin-bottom: 15px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .form-data {
-            background: #f9fafb;
-            padding: 20px;
-            border: 1px solid #e5e7eb;
-            border-radius: 8px;
-            margin-bottom: 20px;
-        }
-
-        .field-group {
-            display: flex;
-            margin-bottom: 15px;
-        }
-
-        .field-label {
-            font-size: 12px;
-            font-weight: 500;
-            color: #6b7280;
-            width: 200px;
-            text-transform: uppercase;
-        }
-
-        .field-value {
-            font-size: 14px;
-            color: #374151;
-            font-weight: 400;
-            flex: 1;
-        }
-
-        .status-section {
-            margin-bottom: 30px;
-            padding: 20px;
-            border: 1px solid #3b82f6;
-            border-radius: 8px;
-            background: #eff6ff;
-        }
-
-        .status-badge {
-            display: inline-block;
-            padding: 6px 12px;
-            border-radius: 4px;
-            font-size: 11px;
-            font-weight: 600;
-            text-transform: uppercase;
-        }
-
-        .status-submitted {
-            background: #dbeafe;
-            color: #ffffff;
-        }
-
-        .status-pending-it {
-            background: #fbbf24;
-            color: #92400e;
-        }
-
-        .status-pending-director {
-            background: #fbbf24;
-            color: #92400e;
-        }
-
-        .status-pending-accounting {
-            background: #fbbf24;
-            color: #92400e;
-        }
-
-        .status-approved {
-            background: #d1fae5;
-            color: #ffffff;
-        }
-
-        .status-completed {
-            background: #10b981;
-            color: #ffffff;
-        }
-
-        .status-rejected {
-            background: #fee2e2;
-            color: #ffffff;
-        }
-
-        .approval-timeline {
-            margin-top: 30px;
-        }
-
-        .approval-step {
-            display: flex;
-            margin-bottom: 20px;
-            align-items: flex-start;
-        }
-
-        .step-number {
-            width: 30px;
-            height: 30px;
-            border-radius: 50%;
-            background: #3b82f6;
-            color: white;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: 600;
-            font-size: 14px;
-        }
-
-        .step-content {
-            flex: 1;
-            margin-left: 20px;
-        }
-
-        .step-header {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 10px;
-        }
-
-        .step-role {
-            font-size: 12px;
-            font-weight: 500;
-            color: #6b7280;
-            text-transform: uppercase;
-        }
-
-        .step-date {
-            font-size: 11px;
-            color: #9ca3af;
-        }
-
-        .step-notes {
-            font-size: 13px;
-            color: #6b7280;
-            margin-bottom: 15px;
-            font-style: italic;
-        }
-
-        .signature-section {
-            margin-top: 20px;
-            padding: 20px;
-            border: 1px solid #e5e7eb;
-            border-radius: 8px;
-            background: #f0fdf4;
-        }
-
-        .signature-container {
-            display: flex;
-            align-items: center;
-            gap: 20px;
-        }
-
-        .signature-image {
-            max-width: 200px;
-            border: 2px solid #e5e7eb;
-            border-radius: 8px;
-            padding: 10px;
-            background: white;
-        }
-
-        .signature-info {
-            flex: 1;
-        }
-
-        .signature-name {
-            font-size: 14px;
-            font-weight: 600;
-            color: #374151;
-            margin-bottom: 5px;
-        }
-
-        .signature-date {
-            font-size: 11px;
-            color: #9ca3af;
-        }
-
-        .verification-badge {
-            display: inline-block;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 10px;
-            font-weight: 600;
-            background: #10b981;
-            color: white;
-            margin-left: 10px;
-        }
-
-        .footer {
-            margin-top: 40px;
-            padding-top: 20px;
-            border-top: 1px solid #e5e7eb;
+        .align-center {
             text-align: center;
-            font-size: 11px;
-            color: #9ca3af;
         }
 
-        .watermark {
-            position: fixed;
-            bottom: 10px;
-            right: 10px;
-            font-size: 10px;
-            color: rgba(0, 0, 0, 0.1);
-            pointer-events: none;
+        .align-right {
+            text-align: right;
+        }
+
+        .signature {
+            position: absolute;
+            z-index: 2;
+            object-fit: contain;
+            overflow: hidden;
+        }
+
+        .name-line {
+            position: absolute;
+            z-index: 2;
+            font-size: 6.7pt;
+            font-weight: 700;
+            text-align: center;
+            line-height: 1.1;
+            white-space: nowrap;
+            overflow: hidden;
         }
     </style>
 </head>
 <body>
-    <div class="watermark">Yuli Sekuritas Indonesia - GESIT System</div>
-
-    <div class="container">
-        <!-- Company Header -->
-        <div class="company-header">
-            <div>
-                <div class="company-name">Yuli Sekuritas Indonesia</div>
-                <div class="company-address">Jalan Jenderal Sudirman No. 27, Jakarta Selatan 12920, Indonesia</div>
-                <div style="color: #3b82f6; font-size: 14px; font-weight: 600;">GESIT - General Enterprise Service & IT</div>
-            </div>
-            <div style="text-align: right; font-size: 12px; color: #64748b;">
-                Tanggal: {{ $submission->created_at->format('d F Y') }}
-            </div>
-        </div>
-
-        <!-- Document Title -->
-        <div class="document-title">
-            Form Requisition - {{ $submission->form->name ?? 'Unknown Form' }}
-        </div>
-
-        <!-- Document Information -->
-        <div class="document-info">
-            <div class="info-item">
-                <div class="info-label">Nama Karyawan</div>
-                <div class="info-value">{{ $submission->user->name ?? 'Unknown' }}</div>
-            </div>
-            <div class="info-item">
-                <div class="info-label">Departemen</div>
-                <div class="info-value">{{ $submission->user->department ?? '-' }}</div>
-            </div>
-            <div class="info-item">
-                <div class="info-label">Form ID</div>
-                <div class="info-value">#{{ $submission->id }}</div>
-            </div>
-            <div class="info-item">
-                <div class="info-label">Status</div>
-                <div class="status-badge status-{{ strtolower(str_replace(' ', '-', $submission->current_status)) }}">
-                    {{ ucfirst(str_replace('_', ' ', $submission->current_status)) }}
-                </div>
-            </div>
-        </div>
-
-        <!-- Form Data Section -->
-        <div class="section">
-            <div class="section-title">Form Data</div>
-            <div class="form-data">
-                @foreach($submission->form_data as $key => $value)
-                    @if(is_array($value))
-                        @if($key === 'item_name' || $key === 'employee_name' || $key === 'department')
-                            <div class="field-group">
-                                <div class="field-label">{{ formatFieldLabel($key) }}</div>
-                                <div class="field-value">{{ $value }}</div>
-                            </div>
-                        @elseif($key === 'item_type')
-                            <div class="field-group">
-                                <div class="field-label">Tipe Barang</div>
-                                <div class="field-value">{{ $value }}</div>
-                            </div>
-                        @elseif($key === 'urgency')
-                            <div class="field-group">
-                                <div class="field-label">Status Urgensi</div>
-                                <div class="field-value">{{ $value }}</div>
-                            </div>
-                        @elseif($key === 'estimated_cost')
-                            <div class="field-group">
-                                <div class="field-label">Estimasi Biaya</div>
-                                <div class="field-value">Rp {{ number_format($value, 0, ',', '.') }}</div>
-                            </div>
-                        @else
-                            <div class="field-group">
-                                <div class="field-label">{{ formatFieldLabel($key) }}</div>
-                                <div class="field-value">
-                                    @foreach($value as $subKey => $subValue)
-                                        {{ $subValue }}
-                                        @if(!$loop->last), {{ ', ' }}
-                                    @endforeach
-                                </div>
-                            </div>
-                        @endif
-                    @else
-                        <div class="field-group">
-                            <div class="field-label">{{ formatFieldLabel($key) }}</div>
-                            <div class="field-value">{{ $value }}</div>
-                        </div>
-                    @endif
-                @endforeach
-            </div>
-        </div>
-
-        <!-- Approval Timeline -->
-        <div class="approval-timeline">
-            <div class="section-title">Approval History</div>
-            @foreach($submission->approvalSteps->sortBy('step_number') as $step)
-                <div class="approval-step">
-                    <div class="step-number">{{ $step->step_number }}</div>
-                    <div class="step-content">
-                        <div class="step-header">
-                            <div>
-                                <div class="step-role">{{ $step->approver_role }}</div>
-                                <div class="step-date">{{ $step->approved_at ? $step->approved_at->format('d M Y H:i') : 'Pending' }}</div>
-                            </div>
-                            <div class="status-badge status-{{ strtolower($step->status) }}">
-                                {{ ucfirst($step->status) }}
-                            </div>
-                        </div>
-                        @if($step->notes)
-                            <div class="step-notes">{{ $step->notes }}</div>
-                        @endif
-                    </div>
-                @endforeach
-        </div>
-
-        <!-- Signatures Section -->
-        @if($submission->approvalSteps->pluck('signature')->filter()->isNotEmpty())
-            <div class="signature-section">
-                <div class="section-title">Digital Signatures</div>
-                @foreach($submission->approvalSteps->sortBy('step_number') as $step)
-                    @if($step->signature)
-                        <div class="signature-container">
-                            <img src="{{ asset($step->signature->signature_image) }}" alt="Signature" class="signature-image">
-                            <div class="signature-info">
-                                <div class="signature-name">{{ $step->signature->user->name }}</div>
-                                <div class="signature-date">{{ $step->signature->signed_at->format('d M Y H:i') }}</div>
-                                @if($step->signature->verified)
-                                    <div class="verification-badge">VERIFIED</div>
-                                @endif
-                            </div>
-                        </div>
-                    @endif
-                @endforeach
-            </div>
+    <div class="page">
+        @if($templateDataUri)
+            <img class="template-bg" src="{{ $templateDataUri }}" alt="Template">
         @endif
 
-        <!-- Rejection Reason -->
-        @if($submission->current_status === 'rejected' && $submission->rejection_reason)
-            <div class="section" style="background: #fee2e2;">
-                <div class="section-title" style="color: #ffffff;">Rejection Reason</div>
-                <p style="color: #ffffff; font-size: 14px;">{{ $submission->rejection_reason }}</p>
-            </div>
-        @endif
-    </div>
+        <div class="field mask value-sm" style="left: 397.4pt; top: 110.6pt; width: 82pt;">{{ $displayRequestDate }}</div>
 
-    <!-- Footer -->
-    <div class="footer">
-        <p>Generated by GESIT System - {{ date('Y-m-d H:i:s') }} | Valid: {{ $submission->current_status !== 'rejected' ? 'Yes' : 'No' }}</p>
-        <p>Yuli Sekuritas Indonesia - Internal Use Only</p>
+        <div class="field mask value-md" style="left: 310.1pt; top: 157.5pt; width: 126pt;">{{ $headerRequester }}</div>
+        <div class="field mask value-md" style="left: 310.1pt; top: 168.6pt; width: 114pt;">{{ $displayRequiredDate }}</div>
+
+        @if(strtolower(trim((string) $paymentTerms)) !== 'transfer')
+            <div class="field mask value-md" style="left: 310.1pt; top: 179.7pt; width: 76pt;">{{ $paymentTerms }}</div>
+        @endif
+
+        <div class="field mask value-bold value-lg" style="left: 56.9pt; top: 218.2pt; width: 204pt; min-height: 12pt;">{{ $itemName }}</div>
+        <div class="field mask value-sm" style="left: 51.8pt; top: 248.6pt; width: 244pt; height: 118pt; line-height: 1.17;">{{ $specificationText }}</div>
+
+        <div class="field mask value-md align-center" style="left: 318.9pt; top: 218.2pt; width: 10pt;">{{ $displayQuantity }}</div>
+        <div class="field mask value-md" style="left: 361.9pt; top: 218.2pt; width: 48pt;">{{ $displayPrice }}</div>
+        <div class="field mask value-md" style="left: 486.2pt; top: 218.2pt; width: 48pt;">{{ $displayAmount }}</div>
+        <div class="field mask value-md" style="left: 486.2pt; top: 412.8pt; width: 48pt;">{{ $displayTotal }}</div>
+
+        @if($accountingSignature)
+            <img class="signature" src="{{ $accountingSignature }}" alt="Accounting signature" style="left: 325pt; top: 455pt; width: 78pt; height: 22pt;">
+        @endif
+        <div class="name-line" style="left: 323pt; top: 481.6pt; width: 90pt;">{{ $accountingName }}</div>
+
+        @if($itSignature)
+            <img class="signature" src="{{ $itSignature }}" alt="IT signature" style="left: 448pt; top: 455pt; width: 74pt; height: 22pt;">
+        @endif
+        <div class="name-line" style="left: 441pt; top: 481.6pt; width: 90pt;">{{ $itName }}</div>
+
+        @if($directorSignature)
+            <img class="signature" src="{{ $directorSignature }}" alt="Director signature" style="left: 328pt; top: 509pt; width: 78pt; height: 22pt;">
+        @endif
+        <div class="name-line" style="left: 320pt; top: 535.7pt; width: 104pt;">{{ $directorName }}</div>
     </div>
 </body>
 </html>
-
-@php
-    function formatFieldLabel($key)
-    {
-        $labels = [
-            'employee_name' => 'Nama Karyawan',
-            'department' => 'Departemen',
-            'item_name' => 'Nama Barang',
-            'item_type' => 'Tipe Barang',
-            'specifications' => 'Spesifikasi yang Diinginkan',
-            'reason' => 'Alasan Ingin Membeli',
-            'urgency' => 'Status Urgensi',
-            'estimated_cost' => 'Estimasi Biaya (Rp)',
-            'quantity' => 'Jumlah',
-        ];
-
-        return $labels[$key] ?? ucfirst(str_replace('_', ' ', $key));
-    }

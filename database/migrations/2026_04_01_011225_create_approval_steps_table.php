@@ -20,7 +20,7 @@ return new class extends Migration
             $table->foreignId('approver_id')->nullable()->constrained('users')->onDelete('set null'); // User who approved
             $table->enum('status', ['pending', 'approved', 'rejected'])->default('pending');
             $table->text('notes')->nullable();
-            $table->foreignId('signature_id')->nullable()->constrained('signatures')->onDelete('set null');
+            $table->foreignId('signature_id')->nullable();
             $table->timestamp('approved_at')->nullable();
             $table->timestamps();
         });

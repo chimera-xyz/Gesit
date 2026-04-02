@@ -14,7 +14,6 @@ return new class extends Migration
         Schema::create('signatures', function (Blueprint $table) {
             $table->id();
             $table->foreignId('user_id')->constrained('users')->onDelete('cascade');
-            $table->foreignId('approval_step_id')->nullable()->constrained('approval_steps')->onDelete('set null');
             $table->string('signature_image'); // Path to signature image
             $table->enum('signature_type', ['draw', 'upload']); // Draw or Upload
             $table->text('signature_hash')->nullable(); // For authenticity verification

@@ -36,6 +36,9 @@ Route::middleware('web')->group(function () {
         Route::get('/pdf/preview/{id}', [PDFController::class, 'preview'])
             ->middleware('permission:view submissions');
 
+        Route::get('/pdf/stream/{id}', [PDFController::class, 'stream'])
+            ->middleware('permission:view submissions');
+
         Route::get('/pdf/download/{id}', [PDFController::class, 'download'])
             ->middleware('permission:view submissions');
 

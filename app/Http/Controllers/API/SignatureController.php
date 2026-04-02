@@ -3,17 +3,22 @@
 namespace App\Http\Controllers\API;
 
 use App\Http\Controllers\Controller;
-use App\Models\Signature;
 use App\Models\ApprovalStep;
-use App\Models\FormSubmission;
+use App\Models\Signature;
+use App\Support\SignatureImageProcessor;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
 class SignatureController extends Controller
 {
+    public function __construct(
+        private readonly SignatureImageProcessor $signatureImageProcessor,
+    ) {
+    }
+
     /**
-     * Create digital signature (draw)
+     * Save drawn signature without approving the step yet.
      */
     public function draw(Request $request)
     {
@@ -23,43 +28,37 @@ class SignatureController extends Controller
                 'approval_step_id' => 'required|exists:approval_steps,id',
             ]);
 
-            $signatureImage = $this->processDrawnSignature($validated['signature_data']);
+            $approvalStep = $this->validateApprovalStepOwnership($validated['approval_step_id']);
+            $path = $this->storeBase64Signature($validated['signature_data']);
 
-            // Create signature record
-            $signature = new Signature([
+            $signature = Signature::create([
                 'user_id' => auth()->id(),
-                'approval_step_id' => $validated['approval_step_id'],
-                'signature_image' => $signatureImage,
+                'signature_image' => $path,
                 'signature_type' => 'draw',
+                'metadata' => [
+                    'approval_step_id' => $approvalStep->id,
+                    'submitted_via' => 'draw',
+                ],
+                'verified' => true,
                 'signed_at' => now(),
             ]);
 
-            // Generate verification hash
             $signature->generateHash();
-
-            // Save signature
-            $signature->save();
-
-            // Update approval step with signature
-            $approvalStep = ApprovalStep::findOrFail($validated['approval_step_id']);
-            $approvalStep->signature_id = $signature->id;
-            $approvalStep->status = 'approved';
-            $approvalStep->approved_at = now();
-            $approvalStep->save();
 
             return response()->json([
                 'success' => true,
                 'signature' => $signature,
-                'signature_url' => url($signatureImage),
+                'signature_url' => $this->publicSignatureUrl($path),
             ]);
         } catch (\Exception $e) {
             Log::error('Signature Draw Error: ' . $e->getMessage());
+
             return response()->json(['error' => $e->getMessage()], 500);
         }
     }
 
     /**
-     * Upload digital signature (image file)
+     * Upload signature image without approving the step yet.
      */
     public function upload(Request $request)
     {
@@ -69,78 +68,62 @@ class SignatureController extends Controller
                 'approval_step_id' => 'required|exists:approval_steps,id',
             ]);
 
-            // Process and store uploaded signature
-            $signatureImage = $this->processUploadedSignature($request->file('signature'));
+            $approvalStep = $this->validateApprovalStepOwnership($validated['approval_step_id']);
+            $file = $request->file('signature');
+            $path = $this->signatureImageProcessor->storeNormalizedBinary(
+                (string) file_get_contents($file->getRealPath()),
+                (int) auth()->id()
+            );
 
-            // Create signature record
-            $signature = new Signature([
+            $signature = Signature::create([
                 'user_id' => auth()->id(),
-                'approval_step_id' => $validated['approval_step_id'],
-                'signature_image' => $signatureImage,
+                'signature_image' => $path,
                 'signature_type' => 'upload',
+                'metadata' => [
+                    'approval_step_id' => $approvalStep->id,
+                    'submitted_via' => 'upload',
+                ],
+                'verified' => true,
                 'signed_at' => now(),
             ]);
 
-            // Generate verification hash
             $signature->generateHash();
-
-            // Save signature
-            $signature->save();
-
-            // Update approval step with signature
-            $approvalStep = ApprovalStep::findOrFail($validated['approval_step_id']);
-            $approvalStep->signature_id = $signature->id;
-            $approvalStep->status = 'approved';
-            $approvalStep->approved_at = now();
-            $approvalStep->save();
 
             return response()->json([
                 'success' => true,
                 'signature' => $signature,
-                'signature_url' => url($signatureImage),
+                'signature_url' => $this->publicSignatureUrl($path),
             ]);
         } catch (\Exception $e) {
             Log::error('Signature Upload Error: ' . $e->getMessage());
+
             return response()->json(['error' => $e->getMessage()], 500);
         }
     }
 
-    /**
-     * Verify signature authenticity
-     */
     public function verify($id)
     {
         try {
             $signature = Signature::findOrFail($id);
 
-            // Verify hash integrity
-            $isValid = $signature->verifyHash($signature->signature_hash);
-
-            // Check signature age (should be within 24 hours for security)
-            $signatureAge = now()->diffInHours($signature->created_at);
-            $isRecent = $signatureAge <= 24;
-
             return response()->json([
-                'valid' => $isValid && $isRecent,
+                'valid' => $signature->verifyHash($signature->signature_hash),
                 'verified' => $signature->verified,
                 'created_at' => $signature->created_at,
-                'signature_age_hours' => $signatureAge,
             ]);
         } catch (\Exception $e) {
             Log::error('Signature Verification Error: ' . $e->getMessage());
+
             return response()->json(['error' => $e->getMessage()], 500);
         }
     }
 
-    /**
-     * Get user signatures
-     */
     public function userSignatures()
     {
         try {
             $signatures = Signature::with('approvalStep.formSubmission')
                 ->where('user_id', auth()->id())
-                ->orderBy('created_at', 'desc')
+                ->latest()
                 ->get();
 
             return response()->json([
@@ -148,29 +131,21 @@ class SignatureController extends Controller
             ]);
         } catch (\Exception $e) {
             Log::error('Get User Signatures Error: ' . $e->getMessage());
+
             return response()->json(['error' => $e->getMessage()], 500);
         }
     }
 
-    /**
-     * Delete signature
-     */
     public function destroy($id)
     {
         try {
             $signature = Signature::findOrFail($id);
 
-            // Check ownership
             if ($signature->user_id !== auth()->id()) {
                 return response()->json(['error' => 'Unauthorized'], 403);
             }
 
-            // Delete image file
-            if ($signature->signature_image && Storage::exists($signature->signature_image)) {
-                Storage::delete($signature->signature_image);
-            }
-
-            // Delete signature record
+            Storage::disk('public')->delete($signature->signature_image);
             $signature->delete();
 
             return response()->json([
@@ -179,110 +154,44 @@ class SignatureController extends Controller
             ]);
         } catch (\Exception $e) {
             Log::error('Signature Delete Error: ' . $e->getMessage());
+
             return response()->json(['error' => $e->getMessage()], 500);
         }
     }
 
-    /**
-     * Process drawn signature from canvas data
-     */
-    private function processDrawnSignature($signatureData)
+    private function validateApprovalStepOwnership(int $approvalStepId): ApprovalStep
     {
-        // Decode base64 signature data
-        $imageData = explode(',', $signatureData);
-        $imageData = explode(';', $imageData[1]);
+        $approvalStep = ApprovalStep::findOrFail($approvalStepId);
+        $user = auth()->user();
 
-        // Create image from base64 data
-        $image = imagecreatefromstring($imageData[1]);
-
-        if (!$image) {
-            throw new \Exception('Invalid signature data');
+        if (!$user->hasRole('Admin') && !$user->hasRole($approvalStep->approver_role)) {
+            abort(403, 'Unauthorized');
         }
 
-        // Add transparency background
-        imagealphablending($image, true);
-
-        // Remove white background (common in canvas signatures)
-        $white = imagecolorallocate($image, 255, 255, 255);
-        imagecolortransparent($image, $white);
-
-        // Resize signature for better quality
-        $signatureResized = imagescale($image, 500, 200, true);
-
-        // Generate watermark
-        $watermarked = $this->addWatermark($signatureResized);
-
-        // Save signature with timestamp and verification data
-        $filename = 'signature_' . auth()->id() . '_' . now()->format('Y-m-d_His') . '.png';
-        $path = "signatures/{$filename}";
-
-        Storage::put($path, $watermarked);
-
-        return $path;
-    }
-
-    /**
-     * Process uploaded signature image
-     */
-    private function processUploadedSignature($uploadedFile)
-    {
-        // Move uploaded file to storage
-        $filename = 'signature_' . auth()->id() . '_' . now()->format('Y-m-d_His') . '.' . $uploadedFile->getClientOriginalExtension();
-        $path = "signatures/{$filename}";
-
-        $uploadedFile->storeAs('signatures', $filename, 'public');
-
-        // Add watermark to uploaded signature
-        $watermarked = $this->addWatermark(storage_path("app/public/{$path}"));
-
-        return $path;
-    }
-
-    /**
-     * Add watermark to signature for authenticity verification
-     */
-    private function addWatermark($imagePath)
-    {
-        $image = imagecreatefrompng($imagePath);
-
-        // Load company watermark
-        $watermarkPath = public_path('images/watermark.png');
-        if (!file_exists($watermarkPath)) {
-            // Create simple watermark text
-            $watermark = imagecreatetruecolor(400, 300, '#808080');
-            $textColor = imagecolorallocate($watermark, 255, 255, 255);
-            $black = imagecolorallocate($watermark, 0, 0, 0);
-            imagefilledellipse($watermark, 200, 150, 0, 0, 0, $black);
-
-            // Add company name and timestamp
-            $text = 'Yuli Sekuritas Indonesia - ' . now()->format('d/m/Y H:i');
-            imagettftext($watermark, 5, 0, $textColor, 'Inter.ttf', 8, 0, $text, $black);
-
-            // Save watermark
-            imagepng($watermark, $watermarkPath);
-            $watermarkPath = $watermark;
+        if ($approvalStep->status !== 'pending') {
+            abort(422, 'Approval step is not pending');
         }
 
-        // Add watermark to signature
-        $watermark = imagecreatefrompng($watermarkPath);
-        $watermarkSize = getimagesize($watermark);
+        return $approvalStep;
+    }
 
-        // Calculate watermark position (bottom right)
-        $destX = imagesx($image) - $watermarkSize[0] - 20;
-        $destY = imagesy($image) - $watermarkSize[1] - 20;
+    private function storeBase64Signature(string $signatureData): string
+    {
+        if (!preg_match('/^data:image\/(\w+);base64,(.+)$/', $signatureData, $matches)) {
+            throw new \RuntimeException('Invalid signature data');
+        }
 
-        // Merge watermark with signature
-        imagecopymerge($watermark, $image, $destX, $destY, 0, 50);
+        $binary = base64_decode($matches[2], true);
 
-        // Save watermarked signature
-        $filename = 'watermarked_' . basename($imagePath);
-        $outputPath = "signatures/{$filename}";
+        if ($binary === false) {
+            throw new \RuntimeException('Invalid signature payload');
+        }
 
-        imagepng($image, $outputPath);
+        return $this->signatureImageProcessor->storeNormalizedBinary($binary, (int) auth()->id());
+    }
 
-        imagedestroy($image);
-        imagedestroy($watermark);
-
-        return $outputPath;
+    private function publicSignatureUrl(string $path): string
+    {
+        return url("/storage/{$path}");
     }
 }

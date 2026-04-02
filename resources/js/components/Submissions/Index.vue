@@ -15,6 +15,7 @@
             <option value="pending_it">Pending IT</option>
             <option value="pending_director">Pending Direktur</option>
             <option value="pending_accounting">Pending Accounting</option>
+            <option value="pending_payment">Pending Konfirmasi Bayar</option>
             <option value="completed">Selesai</option>
             <option value="rejected">Ditolak</option>
           </select>
@@ -135,7 +136,8 @@ const formatStatus = (status) => {
     submitted: 'Dikirim',
     pending_it: 'Pending IT',
     pending_director: 'Pending Direktur',
-    pending_accounting: 'Pending Accounting',
+    pending_accounting: 'Proses Accounting',
+    pending_payment: 'Konfirmasi Bayar',
     completed: 'Selesai',
     rejected: 'Ditolak',
   };
@@ -149,6 +151,7 @@ const getStatusClass = (status) => {
     pending_it: 'status-pending',
     pending_director: 'status-pending',
     pending_accounting: 'status-pending',
+    pending_payment: 'status-pending',
     completed: 'status-completed',
     rejected: 'status-rejected',
   };

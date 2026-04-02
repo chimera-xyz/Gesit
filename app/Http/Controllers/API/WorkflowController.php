@@ -160,7 +160,7 @@ class WorkflowController extends Controller
      */
     private function validateWorkflowSteps($steps)
     {
-        $requiredStepKeys = ['step_number', 'name', 'role', 'action'];
+        $requiredStepKeys = ['step_number', 'name', 'role', 'action', 'status'];
 
         foreach ($steps as $index => $step) {
             foreach ($requiredStepKeys as $key) {
@@ -169,12 +169,16 @@ class WorkflowController extends Controller
                 }
             }
 
-            if (!in_array($step['action'], ['submit', 'approve_reject', 'process', 'complete'])) {
-                throw new \Exception("Step {$index}: Invalid action type");
+            if (!is_numeric($step['step_number'])) {
+                throw new \Exception("Step {$index}: step_number must be numeric");
             }
 
-            if ($step['action'] === 'approve_reject' && !isset($step['required_fields'])) {
-                throw new \Exception("Step {$index}: Approve/Reject action requires 'required_fields'");
+            if (!is_string($step['action']) || trim($step['action']) === '') {
+                throw new \Exception("Step {$index}: action must be a non-empty string");
+            }
+
+            if (!is_string($step['status']) || trim($step['status']) === '') {
+                throw new \Exception("Step {$index}: status must be a non-empty string");
             }
         }
     }
@@ -184,11 +188,9 @@ class WorkflowController extends Controller
      */
     private function validateWorkflowStatuses($statuses)
     {
-        $validStatuses = ['submitted', 'pending', 'approved', 'rejected', 'completed'];
-
-        foreach ($statuses as $status) {
-            if (!in_array($status, $validStatuses)) {
-                throw new \Exception("Invalid workflow status: {$status}");
+        foreach ($statuses as $index => $status) {
+            if (!is_string($status) || trim($status) === '') {
+                throw new \Exception("Status {$index}: status must be a non-empty string");
             }
         }
     }

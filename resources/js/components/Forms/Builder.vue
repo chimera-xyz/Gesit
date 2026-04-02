@@ -1,332 +1,291 @@
 <template>
-  <div class="form-builder">
-    <div class="mb-6">
-      <h1 class="text-3xl font-bold text-gray-900">{{ isEditing ? 'Edit Form' : 'Create New Form' }}</h1>
-      <p class="mt-2 text-gray-600">{{ isEditing ? 'Update the form configuration' : 'Design your form using drag and drop' }}</p>
+  <div class="space-y-6">
+    <div class="flex flex-wrap items-start justify-between gap-4">
+      <div>
+        <p class="text-xs font-semibold uppercase tracking-[0.24em] text-[#a57e3a]">Admin Form Builder</p>
+        <h1 class="mt-2 text-3xl font-bold text-gray-900">{{ isEditing ? 'Edit Form' : 'Buat Form Baru' }}</h1>
+        <p class="mt-2 text-gray-600">Susun field secara drag-and-drop lalu hubungkan ke workflow yang sudah tersedia.</p>
+      </div>
+
+      <router-link to="/forms" class="btn-secondary">Kembali ke daftar form</router-link>
     </div>
 
-    <!-- Form Details -->
-    <div class="card p-6 mb-6">
-      <div class="grid grid-cols-1 gap-6 sm:grid-cols-2">
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-2">Form Name</label>
-          <input
-            v-model="form.name"
-            type="text"
-            class="input-field"
-            placeholder="e.g., Hardware Procurement Form"
-          >
-        </div>
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-2">Description</label>
-          <textarea
-            v-model="form.description"
-            class="input-field"
-            rows="3"
-            placeholder="Describe the purpose of this form"
-          ></textarea>
-        </div>
-      </div>
-      <div class="mt-4">
-        <label class="block text-sm font-medium text-gray-700 mb-2">Workflow</label>
-        <select v-model="form.workflow_id" class="select-field">
-          <option value="">Select a workflow</option>
-          <option v-for="workflow in workflows" :key="workflow.id" :value="workflow.id">
-            {{ workflow.name }}
-          </option>
-        </select>
-      </div>
+    <div v-if="loading" class="flex items-center justify-center py-12">
+      <div class="h-12 w-12 animate-spin rounded-full border-b-2 border-gray-900"></div>
     </div>
 
-    <!-- Form Builder Toolbar -->
-    <div class="card p-4 mb-6">
-      <div class="flex items-center justify-between">
-        <h3 class="text-lg font-medium text-gray-900">Field Toolbox</h3>
-        <div class="flex space-x-2">
-          <button
-            @click="addField('text')"
-            class="btn-secondary text-sm"
-          >
-            + Text
-          </button>
-          <button
-            @click="addField('textarea')"
-            class="btn-secondary text-sm"
-          >
-            + Textarea
-          </button>
-          <button
-            @click="addField('number')"
-            class="btn-secondary text-sm"
-          >
-            + Number
-          </button>
-          <button
-            @click="addField('select')"
-            class="btn-secondary text-sm"
-          >
-            + Select
-          </button>
-          <button
-            @click="addField('date')"
-            class="btn-secondary text-sm"
-          >
-            + Date
-          </button>
-          <button
-            @click="addField('file')"
-            class="btn-secondary text-sm"
-          >
-            + File
-          </button>
-        </div>
-      </div>
-    </div>
+    <div v-else class="space-y-6">
+      <section class="card p-6">
+        <div class="grid gap-5 lg:grid-cols-2">
+          <div>
+            <label class="mb-2 block text-sm font-medium text-gray-700">Nama Form</label>
+            <input v-model="form.name" type="text" class="input-field" placeholder="Contoh: Form Pengadaan Vendor Baru">
+          </div>
 
-    <!-- Form Canvas (Drop Zone) -->
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      <!-- Field Toolbox -->
-      <div class="lg:col-span-1">
-        <div class="card p-4">
-          <h3 class="text-sm font-medium text-gray-900 mb-4">Available Fields</h3>
-          <div class="space-y-2">
-            <div
-              v-for="fieldType in availableFieldTypes"
-              :key="fieldType.type"
-              draggable="true"
-              @dragstart="onDragStart($event, fieldType)"
-              @dragend="onDragEnd"
-              class="form-builder-field cursor-move hover:shadow-md"
-            >
-              <div class="flex items-center">
-                <svg class="h-5 w-5 text-gray-400 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path v-if="fieldType.icon === 'text'" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
-                  <path v-if="fieldType.icon === 'textarea'" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4h16M4 8h16M4 12h16M4 16h16M4 20h16" />
-                  <path v-if="fieldType.icon === 'number'" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 20l4-16m2 16l4-16M7 20h.01M17 20h.01" />
-                  <path v-if="fieldType.icon === 'select'" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-                  <path v-if="fieldType.icon === 'date'" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h.01M16 20h-8m8-5v.01M12 9v.01M3 17a2 2 0 012 2h10a2 2 0 012-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                  <path v-if="fieldType.icon === 'file'" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m0 0l-3-3m6 0l3 3m-6-5h.01M12 12h.01M12 9h.01M12 16h.01" />
-                </svg>
-                <span class="text-sm text-gray-700">{{ fieldType.label }}</span>
+          <div>
+            <label class="mb-2 block text-sm font-medium text-gray-700">Workflow</label>
+            <select v-model="form.workflow_id" class="select-field">
+              <option value="">Pilih workflow</option>
+              <option v-for="workflow in workflows" :key="workflow.id" :value="workflow.id">
+                {{ workflow.name }}
+              </option>
+            </select>
+          </div>
+
+          <div class="lg:col-span-2">
+            <label class="mb-2 block text-sm font-medium text-gray-700">Deskripsi</label>
+            <textarea
+              v-model="form.description"
+              class="input-field"
+              rows="4"
+              placeholder="Jelaskan tujuan form ini dan siapa yang akan menggunakannya."
+            ></textarea>
+          </div>
+        </div>
+      </section>
+
+      <section class="grid gap-6 xl:grid-cols-[0.85fr_1.15fr]">
+        <div class="space-y-6">
+          <div class="card p-5">
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                <h2 class="text-lg font-semibold text-gray-900">Toolbox Field</h2>
+                <p class="mt-1 text-sm text-gray-500">Klik atau drag field ke canvas.</p>
               </div>
             </div>
-          </div>
-        </div>
-      </div>
 
-      <!-- Form Canvas -->
-      <div class="lg:col-span-2">
-        <div
-          class="card p-6 min-h-96"
-          @dragover.prevent="onDragOver"
-          @dragenter.prevent="onDragEnter"
-          @dragleave="onDragLeave"
-          @drop.prevent="onDrop"
-          :class="{ 'border-primary-500 border-2': isDragging }"
-        >
-          <div v-if="builderFields.length === 0" class="flex flex-col items-center justify-center h-64 text-gray-400">
-            <svg class="h-12 w-12 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0 0h6m-6 5h.01M12 9h.01M12 15h.01" />
-            </svg>
-            <p class="text-sm">Drag fields here to build your form</p>
+            <div class="mt-5 grid gap-3 sm:grid-cols-2">
+              <button
+                v-for="fieldType in availableFieldTypes"
+                :key="fieldType.type"
+                type="button"
+                draggable="true"
+                class="form-builder-field cursor-grab text-left"
+                @click="addField(fieldType.type)"
+                @dragstart="onDragStart($event, fieldType)"
+                @dragend="onDragEnd"
+              >
+                <p class="text-sm font-semibold text-gray-900">{{ fieldType.label }}</p>
+                <p class="mt-1 text-xs text-gray-500">{{ fieldType.description }}</p>
+              </button>
+            </div>
           </div>
 
-          <div v-else class="space-y-4">
-            <div
-              v-for="(field, index) in builderFields"
-              :key="field.id"
-              class="form-builder-field relative group"
-              :class="{ 'selected': selectedFieldId === field.id }"
-            >
-              <div class="flex items-center justify-between mb-2">
-                <span class="text-sm font-medium text-gray-900">{{ field.label || 'Untitled Field' }}</span>
-                <div class="flex space-x-2">
-                  <button
-                    @click="selectField(field.id)"
-                    class="text-gray-400 hover:text-primary-600 transition-colors"
-                    title="Edit Field"
-                  >
-                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414 9.414a1 1 0 01-.293.707l-3-3a1 1 0 01-.707-.293l-1.414 1.414A1 1 0 003 15v4a1 1 0 001 1h2a1 1 0 001 1v4a1 1 0 001 1h1a2 2 0 01-2 2V9a2 2 0 00-2-2H5a2 2 0 00-2 2v9a2 2 0 002 2h1.414a1 1 0 01.707-.293l2.414-2.414a1 1 0 01.293-.707L19 13.414z" />
-                    </svg>
-                  </button>
-                  <button
-                    @click="removeField(field.id)"
-                    class="text-gray-400 hover:text-red-600 transition-colors"
-                    title="Remove Field"
-                  >
-                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
+          <div v-if="selectedField" class="card p-5">
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                <h2 class="text-lg font-semibold text-gray-900">Pengaturan Field</h2>
+                <p class="mt-1 text-sm text-gray-500">Atur label, validasi, dan perilaku field yang dipilih.</p>
+              </div>
+              <button type="button" class="text-sm font-medium text-red-600" @click="removeField(selectedField.id)">Hapus</button>
+            </div>
+
+            <div class="mt-5 space-y-4">
+              <div>
+                <label class="mb-2 block text-sm font-medium text-gray-700">Label</label>
+                <input v-model="selectedField.label" type="text" class="input-field">
               </div>
 
-              <!-- Field Configuration Panel -->
-              <div v-if="selectedFieldId === field.id" class="mt-4 p-4 bg-gray-50 rounded-lg">
-                <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <div>
-                    <label class="block text-xs font-medium text-gray-700 mb-1">Field Label</label>
-                    <input
-                      v-model="field.label"
-                      type="text"
-                      class="input-field text-sm"
-                      placeholder="Field Label"
-                    >
-                  </div>
-                  <div>
-                    <label class="block text-xs font-medium text-gray-700 mb-1">Field ID</label>
-                    <input
-                      v-model="field.id"
-                      type="text"
-                      class="input-field text-sm"
-                      placeholder="field_id"
-                    >
-                  </div>
-                  <div>
-                    <label class="block text-xs font-medium text-gray-700 mb-1">Placeholder</label>
-                    <input
-                      v-model="field.placeholder"
-                      type="text"
-                      class="input-field text-sm"
-                      placeholder="Placeholder text"
-                    >
-                  </div>
-                  <div>
-                    <label class="block text-xs font-medium text-gray-700 mb-1">Default Value</label>
-                    <input
-                      v-model="field.default"
-                      type="text"
-                      class="input-field text-sm"
-                      placeholder="Default value"
-                    >
-                  </div>
-                  <div class="flex items-center">
-                    <input
-                      v-model="field.required"
-                      type="checkbox"
-                      class="h-4 w-4 text-primary-600 rounded border-gray-300 focus:ring-primary-500"
-                    >
-                    <label class="ml-2 text-xs font-medium text-gray-700">Required Field</label>
-                  </div>
-                  <div v-if="field.type === 'select'">
-                    <label class="block text-xs font-medium text-gray-700 mb-1">Options (comma separated)</label>
-                    <input
-                      v-model="field.options"
-                      type="text"
-                      class="input-field text-sm"
-                      placeholder="Option 1, Option 2, Option 3"
-                    >
-                  </div>
-                </div>
-                <div class="mt-4">
-                  <label class="block text-xs font-medium text-gray-700 mb-1">Validation Rules</label>
-                  <input
-                    v-model="field.validation"
-                    type="text"
-                    class="input-field text-sm"
-                    placeholder="e.g., required|string|max:255"
-                  >
-                </div>
+              <div>
+                <label class="mb-2 block text-sm font-medium text-gray-700">Field ID</label>
+                <input v-model="selectedField.id" type="text" class="input-field">
               </div>
 
-              <!-- Field Preview -->
-              <div class="mt-4 p-3 bg-white border border-gray-200 rounded">
-                <label class="block text-xs font-medium text-gray-700 mb-1">{{ field.label || 'Preview' }}</label>
+              <div>
+                <label class="mb-2 block text-sm font-medium text-gray-700">Placeholder</label>
+                <input v-model="selectedField.placeholder" type="text" class="input-field">
+              </div>
+
+              <div>
+                <label class="mb-2 block text-sm font-medium text-gray-700">Default Value</label>
+                <input v-model="selectedField.default" type="text" class="input-field">
+              </div>
+
+              <div v-if="supportsOptions(selectedField.type)">
+                <label class="mb-2 block text-sm font-medium text-gray-700">Opsi</label>
                 <input
-                  v-if="field.type === 'text'"
+                  v-model="selectedField.optionsText"
                   type="text"
-                  class="input-field text-sm"
-                  :placeholder="field.placeholder"
-                  :required="field.required"
-                >
-                <textarea
-                  v-if="field.type === 'textarea'"
-                  class="input-field text-sm"
-                  rows="3"
-                  :placeholder="field.placeholder"
-                  :required="field.required"
-                ></textarea>
-                <input
-                  v-if="field.type === 'number'"
-                  type="number"
-                  class="input-field text-sm"
-                  :placeholder="field.placeholder"
-                  :required="field.required"
-                >
-                <select
-                  v-if="field.type === 'select'"
-                  class="select-field text-sm"
-                  :required="field.required"
-                >
-                  <option value="">Select an option</option>
-                  <option v-for="(option, idx) in field.options?.split(',') || []" :key="idx" :value="option.trim()">
-                    {{ option.trim() }}
-                  </option>
-                </select>
-                <input
-                  v-if="field.type === 'date'"
-                  type="date"
-                  class="input-field text-sm"
-                  :required="field.required"
-                >
-                <input
-                  v-if="field.type === 'file'"
-                  type="file"
-                  class="text-sm"
-                  :required="field.required"
+                  class="input-field"
+                  placeholder="Pisahkan dengan koma, contoh: Hardware, Software"
                 >
               </div>
-            </div>
 
-            <!-- Add Field Between -->
-            <div
-              v-if="index < builderFields.length - 1"
-              @click="addFieldAtIndex(index + 1)"
-              class="flex items-center justify-center py-4 border-t border-dashed border-gray-300 cursor-pointer hover:bg-gray-50"
-            >
-              <svg class="h-5 w-5 text-gray-400 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0 0h6m-6 5h.01M12 12h.01M12 9h.01" />
-              </svg>
-              <span class="text-sm text-gray-500">Add field here</span>
+              <div>
+                <label class="mb-2 block text-sm font-medium text-gray-700">Validation Rules</label>
+                <input
+                  v-model="selectedField.validation"
+                  type="text"
+                  class="input-field"
+                  placeholder="Contoh: string|max:255"
+                >
+              </div>
+
+              <div class="grid gap-3 sm:grid-cols-2">
+                <label class="flex items-center gap-3 rounded-2xl border border-gray-200 px-4 py-3">
+                  <input v-model="selectedField.required" type="checkbox">
+                  <span class="text-sm text-gray-700">Wajib diisi</span>
+                </label>
+                <label class="flex items-center gap-3 rounded-2xl border border-gray-200 px-4 py-3">
+                  <input v-model="selectedField.readonly" type="checkbox">
+                  <span class="text-sm text-gray-700">Readonly</span>
+                </label>
+              </div>
+
+              <div>
+                <label class="mb-2 block text-sm font-medium text-gray-700">Auto Fill</label>
+                <select v-model="selectedField.auto_fill" class="select-field">
+                  <option value="">Tidak ada</option>
+                  <option value="user.name">User Name</option>
+                  <option value="user.email">User Email</option>
+                  <option value="user.department">User Department</option>
+                  <option value="user.employee_id">User Employee ID</option>
+                  <option value="today">Tanggal Hari Ini</option>
+                </select>
+              </div>
             </div>
           </div>
         </div>
-      </div>
-    </div>
 
-    <!-- Action Buttons -->
-    <div class="flex justify-end space-x-3 mt-6">
-      <button
-        @click="saveForm"
-        :disabled="isSaving || !form.name || builderFields.length === 0"
-        class="btn-primary"
-      >
-        {{ isSaving ? 'Saving...' : (isEditing ? 'Update Form' : 'Create Form') }}
-      </button>
-      <router-link
-        to="/forms"
-        class="btn-secondary"
-      >
-        Cancel
-      </router-link>
+        <div class="card p-6">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <h2 class="text-lg font-semibold text-gray-900">Canvas Form</h2>
+              <p class="mt-1 text-sm text-gray-500">Urutan field di sini akan menjadi urutan form di halaman user.</p>
+            </div>
+            <span class="rounded-full bg-[#fbf5ea] px-3 py-1 text-xs font-semibold text-[#8f6115]">
+              {{ builderFields.length }} field
+            </span>
+          </div>
+
+          <div
+            class="mt-5 min-h-[24rem] rounded-[1.5rem] border border-dashed border-gray-300 bg-[#fffdf9] p-5"
+            :class="{ 'border-[#c7911d] bg-[#fff9ef]': isDragging }"
+            @dragover.prevent="onDragOver"
+            @dragenter.prevent="onDragEnter"
+            @drop.prevent="onDrop"
+          >
+            <div v-if="builderFields.length === 0" class="flex h-full min-h-[18rem] flex-col items-center justify-center text-center">
+              <p class="text-base font-semibold text-gray-900">Belum ada field</p>
+              <p class="mt-2 max-w-sm text-sm leading-6 text-gray-500">Tarik field dari toolbox atau klik salah satu tipe field untuk mulai membangun form.</p>
+            </div>
+
+            <div v-else class="space-y-4">
+              <button
+                v-for="(field, index) in builderFields"
+                :key="field.uid"
+                type="button"
+                class="form-builder-field block w-full text-left"
+                :class="{ selected: selectedFieldId === field.uid }"
+                @click="selectField(field.uid)"
+              >
+                <div class="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p class="text-sm font-semibold text-gray-900">{{ field.label || 'Untitled Field' }}</p>
+                    <p class="mt-1 text-xs uppercase tracking-[0.18em] text-gray-500">{{ field.type }}</p>
+                  </div>
+
+                  <div class="flex items-center gap-2 text-xs text-gray-500">
+                    <span v-if="field.required" class="rounded-full bg-red-50 px-3 py-1 font-semibold text-red-600">Required</span>
+                    <span v-if="field.readonly" class="rounded-full bg-gray-100 px-3 py-1 font-semibold text-gray-600">Readonly</span>
+                    <button type="button" class="text-red-600" @click.stop="removeField(field.uid)">Hapus</button>
+                  </div>
+                </div>
+
+                <div class="mt-4 rounded-2xl border border-gray-200 bg-white p-4">
+                  <template v-if="['text', 'email', 'number', 'date'].includes(field.type)">
+                    <input :type="field.type" class="input-field" :placeholder="field.placeholder || field.label">
+                  </template>
+
+                  <template v-else-if="field.type === 'textarea'">
+                    <textarea class="input-field" rows="4" :placeholder="field.placeholder || field.label"></textarea>
+                  </template>
+
+                  <template v-else-if="field.type === 'select'">
+                    <select class="select-field">
+                      <option value="">Pilih salah satu</option>
+                      <option v-for="option in normalizeOptions(field.optionsText)" :key="option" :value="option">
+                        {{ option }}
+                      </option>
+                    </select>
+                  </template>
+
+                  <template v-else-if="field.type === 'radio'">
+                    <div class="grid gap-3 sm:grid-cols-2">
+                      <label
+                        v-for="option in normalizeOptions(field.optionsText)"
+                        :key="option"
+                        class="flex items-center gap-3 rounded-2xl border border-gray-200 px-4 py-3 text-sm text-gray-700"
+                      >
+                        <input type="radio">
+                        {{ option }}
+                      </label>
+                    </div>
+                  </template>
+
+                  <template v-else-if="field.type === 'checkbox'">
+                    <div class="grid gap-3 sm:grid-cols-2">
+                      <label
+                        v-for="option in normalizeOptions(field.optionsText)"
+                        :key="option"
+                        class="flex items-center gap-3 rounded-2xl border border-gray-200 px-4 py-3 text-sm text-gray-700"
+                      >
+                        <input type="checkbox">
+                        {{ option }}
+                      </label>
+                    </div>
+                  </template>
+
+                  <template v-else-if="field.type === 'file'">
+                    <input type="file" class="block w-full text-sm text-gray-700">
+                  </template>
+                </div>
+
+                <div class="mt-4 flex items-center justify-between text-xs text-gray-500">
+                  <span>ID: {{ field.id }}</span>
+                  <div class="flex items-center gap-2">
+                    <button type="button" @click.stop="moveField(index, index - 1)" :disabled="index === 0">Naik</button>
+                    <button type="button" @click.stop="moveField(index, index + 1)" :disabled="index === builderFields.length - 1">Turun</button>
+                  </div>
+                </div>
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div class="flex flex-wrap justify-end gap-3">
+        <router-link to="/forms" class="btn-secondary">Batal</router-link>
+        <button
+          type="button"
+          class="btn-primary"
+          :disabled="isSaving || !form.name || !form.workflow_id || builderFields.length === 0"
+          @click="saveForm"
+        >
+          {{ isSaving ? 'Menyimpan...' : (isEditing ? 'Update Form' : 'Simpan Form') }}
+        </button>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue';
-import { useRouter, useRoute } from 'vue-router';
+import axios from 'axios';
+import { computed, onMounted, ref } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { useFormStore } from '../../stores/forms';
 
 const router = useRouter();
 const route = useRoute();
 const formStore = useFormStore();
 
-const isEditing = ref(false);
+const loading = ref(false);
 const isSaving = ref(false);
 const isDragging = ref(false);
+const isEditing = ref(false);
 const selectedFieldId = ref(null);
+const workflows = ref([]);
+const builderFields = ref([]);
 
 const form = ref({
   name: '',
@@ -334,62 +293,75 @@ const form = ref({
   workflow_id: '',
 });
 
-const builderFields = ref([]);
-
-const workflows = ref([]);
-
 const availableFieldTypes = [
-  { type: 'text', label: 'Text Input', icon: 'text' },
-  { type: 'textarea', label: 'Text Area', icon: 'textarea' },
-  { type: 'number', label: 'Number Input', icon: 'number' },
-  { type: 'select', label: 'Select Dropdown', icon: 'select' },
-  { type: 'date', label: 'Date Picker', icon: 'date' },
-  { type: 'file', label: 'File Upload', icon: 'file' },
+  { type: 'text', label: 'Text', description: 'Single-line input untuk data pendek.' },
+  { type: 'email', label: 'Email', description: 'Input email dengan validasi format.' },
+  { type: 'textarea', label: 'Textarea', description: 'Input panjang untuk kebutuhan narasi.' },
+  { type: 'number', label: 'Number', description: 'Input angka seperti jumlah atau biaya.' },
+  { type: 'select', label: 'Select', description: 'Dropdown satu pilihan.' },
+  { type: 'radio', label: 'Radio', description: 'Pilihan tunggal yang langsung terlihat.' },
+  { type: 'checkbox', label: 'Checkbox', description: 'Pilihan jamak untuk lebih dari satu opsi.' },
+  { type: 'date', label: 'Date', description: 'Pilih tanggal dengan date picker.' },
+  { type: 'file', label: 'File', description: 'Upload file pendukung atau lampiran.' },
 ];
 
-const selectField = (fieldId) => {
-  selectedFieldId.value = selectedFieldId.value === fieldId ? null : fieldId;
+const selectedField = computed(() =>
+  builderFields.value.find((field) => field.uid === selectedFieldId.value) || null
+);
+
+const createField = (type) => ({
+  uid: `field_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+  id: `${type}_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
+  type,
+  label: `${type.charAt(0).toUpperCase()}${type.slice(1)} Field`,
+  placeholder: '',
+  default: '',
+  required: false,
+  readonly: false,
+  auto_fill: '',
+  validation: '',
+  optionsText: ['select', 'radio', 'checkbox'].includes(type) ? 'Opsi 1, Opsi 2' : '',
+});
+
+const normalizeOptions = (optionsText) =>
+  (optionsText || '')
+    .split(',')
+    .map((option) => option.trim())
+    .filter(Boolean);
+
+const supportsOptions = (type) => ['select', 'radio', 'checkbox'].includes(type);
+
+const selectField = (fieldUid) => {
+  selectedFieldId.value = fieldUid;
 };
 
 const addField = (type) => {
-  const newField = {
-    id: `field_${Date.now()}`,
-    type: type,
-    label: `${type.charAt(0).toUpperCase() + type.slice(1)} Field`,
-    placeholder: '',
-    required: false,
-    validation: '',
-    options: '',
-  };
-  builderFields.value.push(newField);
-  selectField(newField.id);
+  const field = createField(type);
+  builderFields.value.push(field);
+  selectedFieldId.value = field.uid;
 };
 
-const addFieldAtIndex = (index) => {
-  const newField = {
-    id: `field_${Date.now()}`,
-    type: 'text',
-    label: 'New Field',
-    placeholder: '',
-    required: false,
-    validation: '',
-    options: '',
-  };
-  builderFields.value.splice(index, 0, newField);
-  selectField(newField.id);
-};
+const removeField = (fieldUid) => {
+  builderFields.value = builderFields.value.filter((field) => field.uid !== fieldUid);
 
-const removeField = (fieldId) => {
-  builderFields.value = builderFields.value.filter(field => field.id !== fieldId);
-  if (selectedFieldId.value === fieldId) {
-    selectedFieldId.value = null;
+  if (selectedFieldId.value === fieldUid) {
+    selectedFieldId.value = builderFields.value[0]?.uid || null;
   }
+};
+
+const moveField = (fromIndex, toIndex) => {
+  if (toIndex < 0 || toIndex >= builderFields.value.length) {
+    return;
+  }
+
+  const [field] = builderFields.value.splice(fromIndex, 1);
+  builderFields.value.splice(toIndex, 0, field);
 };
 
 const onDragStart = (event, fieldType) => {
   isDragging.value = true;
   event.dataTransfer.effectAllowed = 'copy';
-  event.dataTransfer.setData('fieldType', JSON.stringify(fieldType));
+  event.dataTransfer.setData('field-type', fieldType.type);
 };
 
 const onDragOver = (event) => {
@@ -397,76 +369,126 @@ const onDragOver = (event) => {
   event.dataTransfer.dropEffect = 'copy';
 };
 
-const onDragEnter = (event) => {
-  event.preventDefault();
-};
-
-const onDragLeave = (event) => {
-  event.preventDefault();
+const onDragEnter = () => {
+  isDragging.value = true;
 };
 
 const onDrop = (event) => {
-  event.preventDefault();
-  isDragging.value = false;
+  const type = event.dataTransfer.getData('field-type');
 
-  const fieldTypeData = event.dataTransfer.getData('fieldType');
-  if (fieldTypeData) {
-    const fieldType = JSON.parse(fieldTypeData);
-    addField(fieldType.type);
+  if (type) {
+    addField(type);
   }
+
+  isDragging.value = false;
 };
 
 const onDragEnd = () => {
   isDragging.value = false;
 };
 
+const serializeFields = () =>
+  builderFields.value.map((field) => {
+    const payload = {
+      id: field.id,
+      type: field.type,
+      label: field.label,
+      placeholder: field.placeholder,
+      default: field.default,
+      required: field.required,
+      readonly: field.readonly,
+      auto_fill: field.auto_fill || null,
+      validation: field.validation,
+    };
+
+    if (supportsOptions(field.type)) {
+      payload.options = normalizeOptions(field.optionsText);
+    }
+
+    return payload;
+  });
+
+const hydrateFields = (fields = []) =>
+  fields.map((field, index) => ({
+    uid: field.uid || `field_${Date.now()}_${index}`,
+    id: field.id || `field_${index + 1}`,
+    type: field.type || 'text',
+    label: field.label || 'Untitled Field',
+    placeholder: field.placeholder || '',
+    default: field.default || '',
+    required: Boolean(field.required),
+    readonly: Boolean(field.readonly),
+    auto_fill: field.auto_fill || '',
+    validation: field.validation || '',
+    optionsText: Array.isArray(field.options) ? field.options.join(', ') : (field.options || ''),
+  }));
+
+const loadWorkflows = async () => {
+  const response = await axios.get('/api/workflows');
+  workflows.value = response.data.workflows || [];
+};
+
+const loadForm = async () => {
+  if (!route.params.id) {
+    return;
+  }
+
+  isEditing.value = true;
+
+  const response = await formStore.fetchForm(route.params.id);
+  const payload = response.form;
+
+  form.value = {
+    name: payload.name || '',
+    description: payload.description || '',
+    workflow_id: payload.workflow_id || '',
+  };
+  builderFields.value = hydrateFields(payload.form_config?.fields || []);
+  selectedFieldId.value = builderFields.value[0]?.uid || null;
+};
+
 const saveForm = async () => {
-  if (isSaving.value) return;
+  if (isSaving.value) {
+    return;
+  }
 
   isSaving.value = true;
 
   try {
-    const formData = {
+    const payload = {
       ...form.value,
       form_config: {
-        fields: builderFields.value,
+        fields: serializeFields(),
       },
+      is_active: true,
     };
 
     if (route.params.id) {
-      await formStore.updateForm(route.params.id, formData);
+      await formStore.updateForm(route.params.id, payload);
     } else {
-      await formStore.createForm(formData);
+      await formStore.createForm(payload);
     }
 
     router.push('/forms');
   } catch (error) {
     console.error('Error saving form:', error);
-    alert('Failed to save form. Please try again.');
+    alert(error.response?.data?.error || 'Gagal menyimpan form.');
   } finally {
     isSaving.value = false;
   }
 };
 
-const loadForm = async () => {
-  if (route.params.id) {
-    isEditing.value = true;
-    try {
-      const formData = await formStore.fetchForm(route.params.id);
-      form.value = {
-        name: formData.name,
-        description: formData.description,
-        workflow_id: formData.workflow_id,
-      };
-      builderFields.value = formData.form_config?.fields || [];
-    } catch (error) {
-      console.error('Error loading form:', error);
-      router.push('/forms');
-    }
-  }
-};
+onMounted(async () => {
+  loading.value = true;
 
-onMounted(() => {
-  loadForm();
+  try {
+    await Promise.all([loadWorkflows(), loadForm()]);
+  } catch (error) {
+    console.error('Error loading builder data:', error);
+    alert('Builder gagal dimuat.');
+    router.push('/forms');
+  } finally {
+    loading.value = false;
+  }
 });
 </script>

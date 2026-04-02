@@ -4,125 +4,174 @@ namespace App\Http\Controllers\API;
 
 use App\Http\Controllers\Controller;
 use App\Models\FormSubmission;
+use App\Support\SubmissionPdfService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
-use PDF;
 
 class PDFController extends Controller
 {
+    public function __construct(
+        private readonly SubmissionPdfService $pdfService,
+    ) {
+    }
+
     /**
-     * Generate PDF for form submission
+     * Generate or regenerate PDF for a submission.
      */
     public function generate(Request $request, $id)
     {
         try {
-            $submission = FormSubmission::with(['form', 'user', 'approvalSteps.signature'])->findOrFail($id);
+            $submission = FormSubmission::with([
+                'form.workflow',
+                'user.roles',
+                'approvalSteps.approver.roles',
+                'approvalSteps.signature.user',
+            ])->findOrFail($id);
 
-            // Validate that user has permission
-            if (!auth()->user()->can('view submissions')) {
+            if (!$this->canView($request, $submission)) {
                 return response()->json(['error' => 'Unauthorized'], 403);
             }
 
-            $pdf = $this->generateProfessionalPDF($submission);
-
-            $submission->pdf_path = $pdf['relative_path'];
-            $submission->save();
+            $pdf = $this->pdfService->generate($submission);
 
             return response()->json([
                 'success' => true,
                 'pdf_path' => $pdf['relative_path'],
-                'url' => url($pdf['public_path']),
+                'url' => $pdf['preview_url'],
+                'download_url' => $pdf['download_url'],
             ]);
         } catch (\Exception $e) {
             Log::error('PDF Generation Error: ' . $e->getMessage());
+
             return response()->json(['error' => $e->getMessage()], 500);
         }
     }
 
     /**
-     * Generate professional PDF matching company template
-     */
-    private function generateProfessionalPDF($submission)
-    {
-        $pdf = PDF::loadView('pdf.template', [
-            'submission' => $submission,
-            'company' => [
-                'name' => 'Yuli Sekuritas Indonesia',
-                'logo' => public_path('images/company-logo.png'),
-                'address' => 'Jakarta, Indonesia',
-            ],
-        ])->setPaper('a4', 'portrait');
-
-        $filename = "GESIT_{$submission->id}_" . now()->format('Y-m-d_His') . '.pdf';
-        $directory = storage_path('app/public/pdfs');
-        $absolutePath = "{$directory}/{$filename}";
-
-        if (!is_dir($directory)) {
-            mkdir($directory, 0755, true);
-        }
-
-        $pdf->save($absolutePath);
-
-        return [
-            'filename' => $filename,
-            'absolute_path' => $absolutePath,
-            'relative_path' => "pdfs/{$filename}",
-            'public_path' => "storage/pdfs/{$filename}",
-        ];
-    }
-
-    /**
-     * Get PDF preview URL
+     * Return preview URL for the generated PDF. Generates on demand if missing.
      */
     public function preview(Request $request, $id)
     {
         try {
-            $submission = FormSubmission::findOrFail($id);
+            $submission = FormSubmission::with([
+                'form.workflow',
+                'user.roles',
+                'approvalSteps.approver.roles',
+                'approvalSteps.signature.user',
+            ])->findOrFail($id);
 
-            if (!auth()->user()->can('view submissions')) {
+            if (!$this->canView($request, $submission)) {
                 return response()->json(['error' => 'Unauthorized'], 403);
             }
 
-            $path = storage_path("app/public/{$submission->pdf_path}");
-
-            if (!$submission->pdf_path || !file_exists($path)) {
-                return response()->json(['error' => 'PDF not found'], 404);
+            if (!$this->pdfService->exists($submission)) {
+                $this->pdfService->generate($submission);
             }
 
             return response()->json([
                 'success' => true,
-                'url' => url("storage/{$submission->pdf_path}"),
+                'url' => $this->pdfService->previewUrl($submission),
+                'download_url' => $this->pdfService->downloadUrl($submission),
             ]);
         } catch (\Exception $e) {
             Log::error('PDF Preview Error: ' . $e->getMessage());
+
             return response()->json(['error' => $e->getMessage()], 500);
         }
     }
 
     /**
-     * Download PDF
+     * Stream PDF inline for iframe/browser preview.
+     */
+    public function stream(Request $request, $id)
+    {
+        try {
+            $submission = FormSubmission::with([
+                'form.workflow',
+                'user.roles',
+                'approvalSteps.approver.roles',
+                'approvalSteps.signature.user',
+            ])->findOrFail($id);
+
+            if (!$this->canView($request, $submission)) {
+                abort(403);
+            }
+
+            if (!$this->pdfService->exists($submission)) {
+                $this->pdfService->generate($submission);
+            }
+
+            $path = $this->pdfService->absolutePath($submission);
+
+            if (!$path || !file_exists($path)) {
+                abort(404);
+            }
+
+            return response()->file($path, [
+                'Content-Type' => 'application/pdf',
+                'Content-Disposition' => 'inline; filename="' . basename($path) . '"',
+            ]);
+        } catch (\Exception $e) {
+            Log::error('PDF Stream Error: ' . $e->getMessage());
+            abort(500);
+        }
+    }
+
+    /**
+     * Download generated PDF.
      */
     public function download(Request $request, $id)
     {
         try {
-            $submission = FormSubmission::findOrFail($id);
+            $submission = FormSubmission::with([
+                'form.workflow',
+                'user.roles',
+                'approvalSteps.approver.roles',
+                'approvalSteps.signature.user',
+            ])->findOrFail($id);
 
-            if (!auth()->user()->can('view submissions')) {
+            if (!$this->canView($request, $submission)) {
                 return response()->json(['error' => 'Unauthorized'], 403);
             }
 
-            $path = storage_path("app/public/{$submission->pdf_path}");
+            if (!$this->pdfService->exists($submission)) {
+                $this->pdfService->generate($submission);
+            }
 
-            if (!$submission->pdf_path || !file_exists($path)) {
+            $path = $this->pdfService->absolutePath($submission);
+
+            if (!$path || !file_exists($path)) {
                 return response()->json(['error' => 'PDF not found'], 404);
             }
 
-            $filename = "GESIT_{$submission->id}_" . now()->format('Y-m-d_His') . '.pdf';
-
-            return response()->download($path, $filename);
+            return response()->download($path, basename($path));
         } catch (\Exception $e) {
             Log::error('PDF Download Error: ' . $e->getMessage());
+
             return response()->json(['error' => $e->getMessage()], 500);
         }
+    }
+
+    private function canView(Request $request, FormSubmission $submission): bool
+    {
+        $user = $request->user();
+
+        if (!$user || !$user->can('view submissions')) {
+            return false;
+        }
+
+        if ($user->hasRole('Admin')) {
+            return true;
+        }
+
+        if ((int) $submission->user_id === (int) $user->id) {
+            return true;
+        }
+
+        $roles = $user->roles->pluck('name')->all();
+
+        return $submission->approvalSteps()
+            ->whereIn('approver_role', $roles)
+            ->exists();
     }
 }

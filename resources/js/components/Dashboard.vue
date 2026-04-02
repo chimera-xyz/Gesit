@@ -280,7 +280,7 @@ const primaryAction = computed(() => quickActions.value[0] || null);
 const secondaryAction = computed(() => quickActions.value[1] || null);
 
 const recentSubmissions = computed(() => submissionStore.submissions.slice(0, 5));
-const pendingApprovals = computed(() => submissionStore.getPendingSubmissions.slice(0, 4));
+const pendingApprovals = computed(() => submissionStore.getActionableSubmissions.slice(0, 4));
 
 const pendingCount = computed(() => submissionStore.getPendingSubmissions.length);
 const completedCount = computed(() => submissionStore.getApprovedSubmissions.length);
@@ -328,6 +328,7 @@ const getStatusClass = (status) => {
     pending_it: 'status-pending',
     pending_director: 'status-pending',
     pending_accounting: 'status-pending',
+    pending_payment: 'status-pending',
     approved: 'status-approved',
     completed: 'status-completed',
     rejected: 'status-rejected',
@@ -341,7 +342,8 @@ const formatStatus = (status) => {
     submitted: 'Diajukan',
     pending_it: 'Review IT',
     pending_director: 'Approval Direktur',
-    pending_accounting: 'Review Accounting',
+    pending_accounting: 'Proses Accounting',
+    pending_payment: 'Konfirmasi Pembayaran',
     approved: 'Disetujui',
     completed: 'Selesai',
     rejected: 'Ditolak',
