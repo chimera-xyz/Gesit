@@ -32,6 +32,15 @@ class User extends Authenticatable
     ];
 
     /**
+     * Default attribute values.
+     *
+     * @var array<string, mixed>
+     */
+    protected $attributes = [
+        'is_active' => true,
+    ];
+
+    /**
      * The attributes that should be hidden for serialization.
      *
      * @var list<string>
@@ -101,5 +110,29 @@ class User extends Authenticatable
     public function notifications()
     {
         return $this->hasMany(Notification::class, 'user_id');
+    }
+
+    /**
+     * Get helpdesk tickets created for this user.
+     */
+    public function helpdeskTickets()
+    {
+        return $this->hasMany(HelpdeskTicket::class, 'requester_id');
+    }
+
+    /**
+     * Get helpdesk tickets currently assigned to this user.
+     */
+    public function assignedHelpdeskTickets()
+    {
+        return $this->hasMany(HelpdeskTicket::class, 'assigned_to');
+    }
+
+    /**
+     * Get timeline updates authored by this user in helpdesk tickets.
+     */
+    public function helpdeskTicketUpdates()
+    {
+        return $this->hasMany(HelpdeskTicketUpdate::class);
     }
 }

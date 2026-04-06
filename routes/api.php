@@ -11,7 +11,10 @@ use App\Http\Controllers\API\WorkflowController;
 use App\Http\Controllers\API\PDFController;
 use App\Http\Controllers\API\SignatureController;
 use App\Http\Controllers\API\UserController;
+use App\Http\Controllers\API\AdminUserController;
+use App\Http\Controllers\API\AdminRoleController;
 use App\Http\Controllers\API\NotificationController;
+use App\Http\Controllers\API\HelpdeskTicketController;
 
 Route::middleware('web')->group(function () {
     Route::middleware('guest')->group(function () {
@@ -22,12 +25,28 @@ Route::middleware('web')->group(function () {
     Route::post('/auth/logout', [AuthController::class, 'logout'])
         ->middleware('auth');
 
-    Route::middleware('auth')->group(function () {
+    Route::middleware(['auth', 'active_user'])->group(function () {
         // User Routes
         Route::get('/user', [UserController::class, 'currentUser']);
         Route::get('/user/profile', [UserController::class, 'profile']);
         Route::put('/user/profile', [UserController::class, 'update']);
         Route::put('/user/change-password', [UserController::class, 'changePassword']);
+        Route::get('/users', [AdminUserController::class, 'index'])
+            ->middleware('role:Admin');
+        Route::post('/users', [AdminUserController::class, 'store'])
+            ->middleware('role:Admin');
+        Route::put('/users/{id}', [AdminUserController::class, 'update'])
+            ->middleware('role:Admin');
+        Route::delete('/users/{id}', [AdminUserController::class, 'destroy'])
+            ->middleware('role:Admin');
+        Route::get('/roles', [AdminRoleController::class, 'index'])
+            ->middleware('role:Admin');
+        Route::post('/roles', [AdminRoleController::class, 'store'])
+            ->middleware('role:Admin');
+        Route::put('/roles/{id}', [AdminRoleController::class, 'update'])
+            ->middleware('role:Admin');
+        Route::delete('/roles/{id}', [AdminRoleController::class, 'destroy'])
+            ->middleware('role:Admin');
 
         // PDF Generation Routes
         Route::post('/pdf/generate/{id}', [PDFController::class, 'generate'])
@@ -87,10 +106,23 @@ Route::middleware('web')->group(function () {
 
         // Notification Routes
         Route::get('/notifications', [NotificationController::class, 'index']);
+        Route::get('/notifications/unread-feed', [NotificationController::class, 'unreadFeed']);
         Route::post('/notifications/{id}/read', [NotificationController::class, 'markAsRead']);
         Route::post('/notifications/read-all', [NotificationController::class, 'markAllAsRead']);
         Route::delete('/notifications/{id}', [NotificationController::class, 'destroy']);
         Route::get('/notifications/unread-count', [NotificationController::class, 'unreadCount']);
+
+        // Helpdesk Routes
+        Route::get('/helpdesk/tickets', [HelpdeskTicketController::class, 'index'])
+            ->middleware('permission:view helpdesk tickets');
+        Route::post('/helpdesk/tickets', [HelpdeskTicketController::class, 'store'])
+            ->middleware('permission:create helpdesk tickets');
+        Route::get('/helpdesk/tickets/{id}', [HelpdeskTicketController::class, 'show'])
+            ->middleware('permission:view helpdesk tickets');
+        Route::put('/helpdesk/tickets/{id}', [HelpdeskTicketController::class, 'update'])
+            ->middleware('permission:view helpdesk tickets');
+        Route::post('/helpdesk/tickets/{id}/updates', [HelpdeskTicketController::class, 'addUpdate'])
+            ->middleware('permission:view helpdesk tickets');
 
         // Alternate submissions routes used by the frontend
         Route::get('/submissions', [IndexController::class, 'index'])

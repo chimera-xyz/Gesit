@@ -47,6 +47,7 @@ export const useFormStore = defineStore('forms', {
             try {
                 const response = await axios.post('/api/forms', formData);
                 this.forms.push(response.data.form);
+                this.activeForm = response.data.form;
                 return response.data;
             } catch (error) {
                 console.error('Error creating form:', error);
@@ -61,6 +62,9 @@ export const useFormStore = defineStore('forms', {
                 if (index !== -1) {
                     this.forms[index] = response.data.form;
                 }
+                if (this.activeForm?.id === id) {
+                    this.activeForm = response.data.form;
+                }
                 return response.data;
             } catch (error) {
                 console.error('Error updating form:', error);
@@ -72,6 +76,9 @@ export const useFormStore = defineStore('forms', {
             try {
                 await axios.delete(`/api/forms/${id}`);
                 this.forms = this.forms.filter(form => form.id !== id);
+                if (this.activeForm?.id === id) {
+                    this.activeForm = null;
+                }
                 return true;
             } catch (error) {
                 console.error('Error deleting form:', error);

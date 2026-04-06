@@ -40,6 +40,13 @@ class AuthController extends Controller
             ], 401);
         }
 
+        if (!$user->is_active) {
+            return response()->json([
+                'error' => 'Account disabled',
+                'message' => 'Akun Anda sudah dinonaktifkan. Hubungi admin untuk bantuan lebih lanjut.',
+            ], 403);
+        }
+
         Auth::login($user, (bool) $request->boolean('remember'));
 
         $request->session()->regenerate();

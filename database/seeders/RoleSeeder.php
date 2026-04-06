@@ -58,6 +58,9 @@ class RoleSeeder extends Seeder
             ['name' => 'create signatures', 'guard_name' => 'web'],
             ['name' => 'manage users', 'guard_name' => 'web'],
             ['name' => 'manage workflows', 'guard_name' => 'web'],
+            ['name' => 'view helpdesk tickets', 'guard_name' => 'web'],
+            ['name' => 'create helpdesk tickets', 'guard_name' => 'web'],
+            ['name' => 'manage helpdesk tickets', 'guard_name' => 'web'],
         ];
 
         foreach ($permissions as $permission) {
@@ -68,7 +71,7 @@ class RoleSeeder extends Seeder
         $adminRole = Role::where('name', 'Admin')->first();
         $adminRole->syncPermissions(Permission::all());
 
-        $basePermissions = ['view forms', 'submit forms', 'view submissions'];
+        $basePermissions = ['view forms', 'submit forms', 'view submissions', 'view helpdesk tickets', 'create helpdesk tickets'];
 
         $itRole = Role::where('name', 'IT Staff')->first();
         $itRole->syncPermissions([
@@ -76,6 +79,7 @@ class RoleSeeder extends Seeder
             'approve forms',
             'reject forms',
             'create signatures',
+            'manage helpdesk tickets',
         ]);
 
         $directorRole = Role::where('name', 'Operational Director')->first();

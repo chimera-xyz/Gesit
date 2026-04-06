@@ -47,6 +47,10 @@ class FormSubmissionController extends Controller
                 $query->where('form_id', $request->integer('form_id'));
             }
 
+            if ($request->filled('search')) {
+                $this->applySearchFilter($query, trim((string) $request->string('search')->value()));
+            }
+
             $submissions = $query->paginate(15);
 
             return response()->json([
@@ -119,6 +123,7 @@ class FormSubmissionController extends Controller
                     'form_id' => $form->id,
                     'user_id' => $request->user()->id,
                     'form_data' => [],
+                    'form_snapshot' => $form->form_config,
                     'current_status' => 'submitted',
                     'current_step' => 1,
                     'created_by' => $request->user()->id,
@@ -309,6 +314,7 @@ class FormSubmissionController extends Controller
         ]);
 
         $data = $submission->toArray();
+        $data['form']['form_config'] = $submission->resolvedFormConfig();
         $data['available_actions'] = $this->getAvailableActions($submission);
         $data['current_pending_step'] = $this->getCurrentPendingApprovalStep($submission)?->toArray();
         $data['pdf_preview_url'] = $this->pdfService->previewUrl($submission);
@@ -696,9 +702,77 @@ class FormSubmissionController extends Controller
         });
     }
 
+    private function applySearchFilter(Builder $query, string $search): void
+    {
+        if ($search === '') {
+            return;
+        }
+
+        $matchingStatuses = $this->matchingStatusesForSearch($search);
+
+        $query->where(function (Builder $submissionQuery) use ($search, $matchingStatuses) {
+            $submissionQuery->whereHas('form', function (Builder $formQuery) use ($search) {
+                $formQuery->where('name', 'like', "%{$search}%")
+                    ->orWhere('description', 'like', "%{$search}%")
+                    ->orWhere('slug', 'like', "%{$search}%")
+                    ->orWhereHas('workflow', function (Builder $workflowQuery) use ($search) {
+                        $workflowQuery->where('name', 'like', "%{$search}%");
+                    });
+            })->orWhereHas('user', function (Builder $userQuery) use ($search) {
+                $userQuery->where('name', 'like', "%{$search}%")
+                    ->orWhere('email', 'like', "%{$search}%")
+                    ->orWhere('department', 'like', "%{$search}%")
+                    ->orWhere('employee_id', 'like', "%{$search}%");
+            });
+
+            if (ctype_digit($search)) {
+                $submissionQuery->orWhere('form_submissions.id', (int) $search);
+            }
+
+            if ($matchingStatuses !== []) {
+                $submissionQuery->orWhereIn('current_status', $matchingStatuses);
+            }
+        });
+    }
+
+    private function matchingStatusesForSearch(string $search): array
+    {
+        $normalizedSearch = mb_strtolower(trim($search));
+
+        if ($normalizedSearch === '') {
+            return [];
+        }
+
+        $statusAliases = [
+            'submitted' => ['submitted', 'dikirim'],
+            'pending_it' => ['pending_it', 'pending it', 'it review', 'review it'],
+            'pending_director' => ['pending_director', 'pending director', 'pending direktur', 'direktur'],
+            'pending_accounting' => ['pending_accounting', 'pending accounting', 'proses accounting', 'accounting'],
+            'pending_payment' => ['pending_payment', 'pending payment', 'pending konfirmasi bayar', 'konfirmasi bayar', 'bayar'],
+            'completed' => ['completed', 'selesai'],
+            'rejected' => ['rejected', 'ditolak', 'tolak'],
+        ];
+
+        return collect($statusAliases)
+            ->filter(function (array $aliases) use ($normalizedSearch) {
+                return collect($aliases)->contains(function (string $alias) use ($normalizedSearch) {
+                    return str_contains($alias, $normalizedSearch)
+                        || str_contains($normalizedSearch, $alias);
+                });
+            })
+            ->keys()
+            ->values()
+            ->all();
+    }
+
     private function getFormFields(Form $form): array
     {
         return $form->form_config['fields'] ?? [];
+    }
+
+    private function getSubmissionFields(FormSubmission $submission): array
+    {
+        return $submission->resolvedFormConfig()['fields'] ?? [];
     }
 
     private function normalizeOptions(array|string|null $options): array
@@ -753,7 +827,7 @@ class FormSubmissionController extends Controller
 
     private function validateRevisionFormData(Request $request, FormSubmission $submission): array
     {
-        $fields = $this->getFormFields($submission->form);
+        $fields = $this->getSubmissionFields($submission);
         $existingFormData = $submission->form_data ?? [];
         $incomingData = (array) $request->input('form_data', []);
         $mergedData = array_merge($existingFormData, $incomingData);

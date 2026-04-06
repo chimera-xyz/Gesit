@@ -15,7 +15,7 @@
         <div>
           <p class="text-xs font-semibold uppercase tracking-[0.24em] text-[#a57e3a]">Detail Workflow</p>
           <h1 class="mt-2 text-3xl font-bold text-gray-900">{{ submission.form?.name || 'Submission' }}</h1>
-          <p class="mt-2 text-gray-600">Pantau isi pengajuan, preview PDF, dan proses approval dari halaman yang sama.</p>
+          <p class="mt-2 text-gray-600">Pantau isi pengajuan</p>
         </div>
         <button @click="router.back()" class="btn-secondary">Kembali</button>
       </div>

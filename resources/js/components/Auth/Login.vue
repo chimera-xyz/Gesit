@@ -74,7 +74,7 @@
         </form>
 
         <p class="mt-6 text-center text-xs leading-5 text-[#8a8f98]">
-          Jika membutuhkan akses, hubungi administrator internal.
+          Jika membutuhkan akses, hubungi tim IT.
         </p>
       </section>
     </div>

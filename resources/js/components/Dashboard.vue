@@ -8,7 +8,7 @@
             Selamat datang, {{ firstName }}.
           </h1>
           <p class="mt-3 max-w-2xl text-sm leading-7 text-[#6b7280] sm:text-[0.96rem]">
-            Pantau pengajuan internal, approval berjalan, dan aktivitas terbaru dalam satu tampilan yang lebih ringkas.
+            Pantau pengajuan internal dalam satu tampilan yang lebih ringkas.
           </p>
 
           <div class="mt-6 flex flex-wrap gap-3">
@@ -28,6 +28,15 @@
               class="inline-flex h-11 items-center justify-center rounded-2xl border border-[#e2d3b8] bg-white px-5 text-sm font-medium text-[#7b5a24] transition hover:border-[#cfae72] hover:text-[#946815]"
             >
               {{ secondaryAction.title }}
+            </button>
+
+            <button
+              v-if="canCreateHelpdesk"
+              type="button"
+              @click="handleHelpdeskDashboardAction"
+              class="inline-flex h-11 items-center justify-center rounded-2xl border border-[#e2d3b8] bg-[#fffaf1] px-5 text-sm font-medium text-[#7b5a24] transition hover:border-[#cfae72] hover:bg-white hover:text-[#946815]"
+            >
+              {{ helpdeskDashboardLabel }}
             </button>
           </div>
         </div>
@@ -83,57 +92,104 @@
 
     <section class="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
       <article class="rounded-[28px] border border-[#e8dcc9] bg-white shadow-[0_16px_36px_rgba(41,28,9,0.06)]">
-        <div class="flex items-center justify-between border-b border-[#f0e6d7] px-6 py-5 sm:px-7">
-          <div>
-            <p class="text-xs font-semibold uppercase tracking-[0.22em] text-[#a57e3a]">Aktivitas</p>
-            <h2 class="mt-2 text-xl font-semibold text-[#111827]">Pengajuan terbaru</h2>
-          </div>
-          <router-link to="/submissions" class="text-sm font-medium text-[#8b6316] transition hover:text-[#704d10]">
-            Lihat semua
-          </router-link>
-        </div>
-
-        <div class="px-6 py-5 sm:px-7">
-          <div v-if="recentSubmissions.length === 0" class="rounded-[24px] border border-dashed border-[#e8dcc9] bg-white px-6 py-12 text-center">
-            <div class="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-[#faf5ec] text-[#a57e3a]">
-              <svg class="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9 12h6m-6 4h6m1 5H8a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l3.414 3.414A1 1 0 0118 7.414V19a2 2 0 01-2 2Z" />
-              </svg>
+        <template v-if="canApprove">
+          <div class="flex items-center justify-between border-b border-[#f0e6d7] px-6 py-5 sm:px-7">
+            <div>
+              <p class="text-xs font-semibold uppercase tracking-[0.22em] text-[#a57e3a]">Approval</p>
+              <h2 class="mt-2 text-xl font-semibold text-[#111827]">Menunggu persetujuan</h2>
             </div>
-            <h3 class="mt-4 text-base font-semibold text-[#111827]">Belum ada aktivitas terbaru</h3>
-            <p class="mt-2 text-sm leading-6 text-[#6b7280]">Mulai dari membuat pengajuan baru atau buka daftar form yang tersedia.</p>
+            <router-link to="/submissions" class="text-sm font-medium text-[#8b6316] transition hover:text-[#704d10]">
+              Lihat semua
+            </router-link>
           </div>
 
-          <div v-else class="space-y-3">
-            <button
-              v-for="submission in recentSubmissions"
-              :key="submission.id"
-              type="button"
-              @click="navigateToSubmission(submission.id)"
-              class="flex w-full items-start justify-between gap-4 rounded-[22px] border border-[#eee3d4] px-4 py-4 text-left transition hover:border-[#d8bc84] hover:bg-[#fffdf9]"
-            >
-              <div class="min-w-0">
-                <div class="flex flex-wrap items-center gap-3">
-                  <span class="status-badge" :class="getStatusClass(submission.current_status)">
-                    {{ formatStatus(submission.current_status) }}
-                  </span>
-                  <p class="text-xs font-medium uppercase tracking-[0.18em] text-[#9ca3af]">
-                    {{ submission.user?.name || userName }}
+          <div class="px-6 py-5">
+            <div v-if="pendingApprovals.length === 0" class="rounded-[24px] border border-dashed border-[#e8dcc9] bg-white px-5 py-10 text-center">
+              <h3 class="text-base font-semibold text-[#111827]">Tidak ada approval tertunda</h3>
+              <p class="mt-2 text-sm leading-6 text-[#6b7280]">Semua pengajuan yang perlu Anda cek sudah diproses.</p>
+            </div>
+
+            <div v-else class="space-y-3">
+              <button
+                v-for="approval in pendingApprovals"
+                :key="approval.id"
+                type="button"
+                @click="navigateToSubmission(approval.id)"
+                class="flex w-full items-start justify-between gap-4 rounded-[22px] border border-[#eee3d4] px-4 py-4 text-left transition hover:border-[#d8bc84] hover:bg-[#fffdf9]"
+              >
+                <div class="min-w-0">
+                  <p class="text-sm font-semibold text-[#111827]">{{ approval.form?.name || 'Form tidak diketahui' }}</p>
+                  <p class="mt-1 text-sm text-[#6b7280]">{{ approval.user?.name || 'Pengguna internal' }}</p>
+                  <p class="mt-2 text-xs uppercase tracking-[0.18em] text-[#9ca3af]">
+                    {{ formatStatus(approval.current_status) }}
                   </p>
                 </div>
 
-                <p class="mt-3 text-sm font-semibold text-[#111827]">
-                  {{ submission.form?.name || 'Form tidak diketahui' }}
-                </p>
-                <p class="mt-1 text-sm text-[#6b7280]">
-                  Diajukan {{ formatDate(submission.created_at) }}
-                </p>
-              </div>
-
-              <span class="mt-1 shrink-0 text-sm font-medium text-[#8b6316]">Detail</span>
-            </button>
+                <span class="mt-1 shrink-0 text-sm font-medium text-[#8b6316]">Review</span>
+              </button>
+            </div>
           </div>
-        </div>
+        </template>
+
+        <template v-else>
+          <div class="flex items-center justify-between border-b border-[#f0e6d7] px-6 py-5 sm:px-7">
+            <div>
+              <p class="text-xs font-semibold uppercase tracking-[0.22em] text-[#a57e3a]">Aktivitas</p>
+              <h2 class="mt-2 text-xl font-semibold text-[#111827]">Pengajuan terbaru</h2>
+            </div>
+            <router-link to="/submissions" class="text-sm font-medium text-[#8b6316] transition hover:text-[#704d10]">
+              Lihat semua
+            </router-link>
+          </div>
+
+          <div class="px-6 py-5 sm:px-7">
+            <div v-if="recentSubmissions.length === 0" class="rounded-[24px] border border-dashed border-[#e8dcc9] bg-white px-6 py-12 text-center">
+              <div class="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-[#faf5ec] text-[#a57e3a]">
+                <svg class="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9 12h6m-6 4h6m1 5H8a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l3.414 3.414A1 1 0 0118 7.414V19a2 2 0 01-2 2Z" />
+                </svg>
+              </div>
+              <h3 class="mt-4 text-base font-semibold text-[#111827]">Belum ada aktivitas terbaru</h3>
+              <p class="mt-2 text-sm leading-6 text-[#6b7280]">Mulai dari membuat pengajuan baru atau buka daftar form yang tersedia.</p>
+            </div>
+
+            <div v-else class="space-y-3">
+              <p v-if="recentSubmissions.length > 3" class="text-xs font-medium text-[#9ca3af]">
+                Menampilkan 3 aktivitas teratas, scroll untuk melihat sisanya.
+              </p>
+
+              <div class="max-h-[22.5rem] space-y-3 overflow-y-auto pr-2">
+                <button
+                  v-for="submission in recentSubmissions"
+                  :key="submission.id"
+                  type="button"
+                  @click="navigateToSubmission(submission.id)"
+                  class="flex w-full items-start justify-between gap-4 rounded-[22px] border border-[#eee3d4] px-4 py-4 text-left transition hover:border-[#d8bc84] hover:bg-[#fffdf9]"
+                >
+                  <div class="min-w-0">
+                    <div class="flex flex-wrap items-center gap-3">
+                      <span class="status-badge" :class="getStatusClass(submission.current_status)">
+                        {{ formatStatus(submission.current_status) }}
+                      </span>
+                      <p class="text-xs font-medium uppercase tracking-[0.18em] text-[#9ca3af]">
+                        {{ submission.user?.name || userName }}
+                      </p>
+                    </div>
+
+                    <p class="mt-3 text-sm font-semibold text-[#111827]">
+                      {{ submission.form?.name || 'Form tidak diketahui' }}
+                    </p>
+                    <p class="mt-1 text-sm text-[#6b7280]">
+                      Diajukan {{ formatDate(submission.created_at) }}
+                    </p>
+                  </div>
+
+                  <span class="mt-1 shrink-0 text-sm font-medium text-[#8b6316]">Detail</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </template>
       </article>
 
       <div class="space-y-6">
@@ -173,6 +229,13 @@
                     d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0Z"
                   />
                   <path
+                    v-else-if="action.icon === 'settings'"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="1.8"
+                    d="M10.325 4.317a1.724 1.724 0 013.35 0 1.724 1.724 0 002.573 1.066 1.724 1.724 0 012.875 1.925 1.724 1.724 0 001.066 2.573 1.724 1.724 0 010 3.35 1.724 1.724 0 00-1.066 2.573 1.724 1.724 0 01-2.875 1.925 1.724 1.724 0 00-2.573 1.066 1.724 1.724 0 01-3.35 0 1.724 1.724 0 00-2.573-1.066 1.724 1.724 0 01-2.875-1.925 1.724 1.724 0 00-1.066-2.573 1.724 1.724 0 010-3.35 1.724 1.724 0 001.066-2.573 1.724 1.724 0 012.875-1.925 1.724 1.724 0 002.573-1.066ZM12 15.25a3.25 3.25 0 100-6.5 3.25 3.25 0 000 6.5Z"
+                  />
+                  <path
                     v-else
                     stroke-linecap="round"
                     stroke-linejoin="round"
@@ -194,52 +257,87 @@
           v-if="canApprove"
           class="rounded-[28px] border border-[#e8dcc9] bg-white shadow-[0_16px_36px_rgba(41,28,9,0.06)]"
         >
-          <div class="border-b border-[#f0e6d7] px-6 py-5">
-            <p class="text-xs font-semibold uppercase tracking-[0.22em] text-[#a57e3a]">Approval</p>
-            <h2 class="mt-2 text-xl font-semibold text-[#111827]">Menunggu persetujuan</h2>
+          <div class="flex items-center justify-between border-b border-[#f0e6d7] px-6 py-5">
+            <div>
+              <p class="text-xs font-semibold uppercase tracking-[0.22em] text-[#a57e3a]">Aktivitas</p>
+              <h2 class="mt-2 text-xl font-semibold text-[#111827]">Pengajuan terbaru</h2>
+            </div>
+            <router-link to="/submissions" class="text-sm font-medium text-[#8b6316] transition hover:text-[#704d10]">
+              Lihat semua
+            </router-link>
           </div>
 
           <div class="px-6 py-5">
-            <div v-if="pendingApprovals.length === 0" class="rounded-[24px] border border-dashed border-[#e8dcc9] bg-white px-5 py-10 text-center">
-              <h3 class="text-base font-semibold text-[#111827]">Tidak ada approval tertunda</h3>
-              <p class="mt-2 text-sm leading-6 text-[#6b7280]">Semua pengajuan yang perlu Anda cek sudah diproses.</p>
+            <div v-if="recentSubmissions.length === 0" class="rounded-[24px] border border-dashed border-[#e8dcc9] bg-white px-5 py-10 text-center">
+              <h3 class="text-base font-semibold text-[#111827]">Belum ada aktivitas terbaru</h3>
+              <p class="mt-2 text-sm leading-6 text-[#6b7280]">Belum ada pengajuan baru yang perlu Anda lihat.</p>
             </div>
 
             <div v-else class="space-y-3">
-              <button
-                v-for="approval in pendingApprovals"
-                :key="approval.id"
-                type="button"
-                @click="navigateToSubmission(approval.id)"
-                class="flex w-full items-start justify-between gap-4 rounded-[22px] border border-[#eee3d4] px-4 py-4 text-left transition hover:border-[#d8bc84] hover:bg-[#fffdf9]"
-              >
-                <div class="min-w-0">
-                  <p class="text-sm font-semibold text-[#111827]">{{ approval.form?.name || 'Form tidak diketahui' }}</p>
-                  <p class="mt-1 text-sm text-[#6b7280]">{{ approval.user?.name || 'Pengguna internal' }}</p>
-                  <p class="mt-2 text-xs uppercase tracking-[0.18em] text-[#9ca3af]">
-                    {{ formatStatus(approval.current_status) }}
-                  </p>
-                </div>
+              <div class="max-h-[18rem] space-y-3 overflow-y-auto pr-2">
+                <button
+                  v-for="submission in recentSubmissions"
+                  :key="submission.id"
+                  type="button"
+                  @click="navigateToSubmission(submission.id)"
+                  class="flex w-full items-start justify-between gap-4 rounded-[22px] border border-[#eee3d4] px-4 py-4 text-left transition hover:border-[#d8bc84] hover:bg-[#fffdf9]"
+                >
+                  <div class="min-w-0">
+                    <div class="flex flex-wrap items-center gap-3">
+                      <span class="status-badge" :class="getStatusClass(submission.current_status)">
+                        {{ formatStatus(submission.current_status) }}
+                      </span>
+                      <p class="text-xs font-medium uppercase tracking-[0.18em] text-[#9ca3af]">
+                        {{ submission.user?.name || userName }}
+                      </p>
+                    </div>
 
-                <span class="mt-1 shrink-0 text-sm font-medium text-[#8b6316]">Review</span>
-              </button>
+                    <p class="mt-3 text-sm font-semibold text-[#111827]">
+                      {{ submission.form?.name || 'Form tidak diketahui' }}
+                    </p>
+                    <p class="mt-1 text-sm text-[#6b7280]">
+                      Diajukan {{ formatDate(submission.created_at) }}
+                    </p>
+                  </div>
+
+                  <span class="mt-1 shrink-0 text-sm font-medium text-[#8b6316]">Detail</span>
+                </button>
+              </div>
             </div>
           </div>
         </article>
       </div>
     </section>
+
+    <QuickTicketModal
+      :open="showHelpdeskModal"
+      :filters="helpdeskFilters"
+      :saving="helpdeskSaving"
+      :errors="helpdeskErrors"
+      :context-page="route.fullPath"
+      @close="closeHelpdeskModal"
+      @submit="submitHelpdeskTicket"
+    />
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted } from 'vue';
-import { useRouter } from 'vue-router';
+import { computed, onMounted, ref } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
 import { useSubmissionStore } from '../stores/submissions';
+import { useHelpdeskStore } from '../stores/helpdesk';
+import QuickTicketModal from './Helpdesk/QuickTicketModal.vue';
 
 const router = useRouter();
+const route = useRoute();
 const authStore = useAuthStore();
 const submissionStore = useSubmissionStore();
+const helpdeskStore = useHelpdeskStore();
+
+const showHelpdeskModal = ref(false);
+const helpdeskSaving = ref(false);
+const helpdeskErrors = ref({});
 
 const userName = computed(() => authStore.user?.name || 'User');
 
@@ -250,14 +348,17 @@ const firstName = computed(() => {
 const userRole = computed(() => authStore.roles[0] || 'Internal User');
 
 const canApprove = computed(() => authStore.canApprove);
+const canCreateHelpdesk = computed(() => authStore.hasPermission('create helpdesk tickets'));
+const isItStaff = computed(() => authStore.hasRole('IT Staff'));
+const helpdeskDashboardLabel = computed(() => isItStaff.value ? 'Panel IT' : 'Butuh Bantuan IT');
+const helpdeskFilters = computed(() => helpdeskStore.filters);
 
 const quickActions = computed(() => {
   if (authStore.isAdmin) {
     return [
       { id: 1, title: 'Buat form baru', description: 'Susun form internal baru untuk kebutuhan tim.', to: '/forms/builder', icon: 'form' },
       { id: 2, title: 'Kelola form', description: 'Lihat dan rapikan daftar form yang tersedia.', to: '/forms', icon: 'list' },
-      { id: 3, title: 'Cek approval', description: 'Tinjau pengajuan yang masih menunggu persetujuan.', to: '/submissions', icon: 'approve' },
-      { id: 4, title: 'Buka profil', description: 'Periksa data akun dan peran Anda.', to: '/profile', icon: 'chart' },
+      { id: 3, title: 'Setting aplikasi', description: 'Kelola user, role, dan pengaturan akses dari satu tempat.', to: '/settings', icon: 'settings' },
     ];
   }
 
@@ -279,7 +380,7 @@ const quickActions = computed(() => {
 const primaryAction = computed(() => quickActions.value[0] || null);
 const secondaryAction = computed(() => quickActions.value[1] || null);
 
-const recentSubmissions = computed(() => submissionStore.submissions.slice(0, 5));
+const recentSubmissions = computed(() => submissionStore.submissions.slice(0, 8));
 const pendingApprovals = computed(() => submissionStore.getActionableSubmissions.slice(0, 4));
 
 const pendingCount = computed(() => submissionStore.getPendingSubmissions.length);
@@ -371,6 +472,67 @@ const navigateToAction = (to) => {
 
 const navigateToSubmission = (id) => {
   router.push(`/submissions/${id}`);
+};
+
+const normalizeErrors = (errors) => {
+  return Object.fromEntries(
+    Object.entries(errors || {}).map(([key, value]) => [key, Array.isArray(value) ? value[0] : value]),
+  );
+};
+
+const openHelpdeskModal = async () => {
+  helpdeskErrors.value = {};
+
+  if (!helpdeskStore.filters.categories.length) {
+    try {
+      await helpdeskStore.fetchTickets();
+    } catch (error) {
+      helpdeskErrors.value = {
+        general: error.response?.data?.error || 'Form bantuan IT belum bisa dimuat.',
+      };
+    }
+  }
+
+  showHelpdeskModal.value = true;
+};
+
+const handleHelpdeskDashboardAction = async () => {
+  if (isItStaff.value) {
+    router.push('/helpdesk');
+    return;
+  }
+
+  await openHelpdeskModal();
+};
+
+const closeHelpdeskModal = () => {
+  showHelpdeskModal.value = false;
+  helpdeskErrors.value = {};
+};
+
+const submitHelpdeskTicket = async (payload) => {
+  helpdeskSaving.value = true;
+  helpdeskErrors.value = {};
+
+  try {
+    const response = await helpdeskStore.createTicket(payload);
+    closeHelpdeskModal();
+
+    if (response.ticket?.id) {
+      router.push(`/helpdesk/${response.ticket.id}`);
+    }
+  } catch (error) {
+    if (error.response?.status === 422 && error.response?.data?.errors) {
+      helpdeskErrors.value = normalizeErrors(error.response.data.errors);
+      return;
+    }
+
+    helpdeskErrors.value = {
+      general: error.response?.data?.error || 'Ticket bantuan gagal dikirim ke IT.',
+    };
+  } finally {
+    helpdeskSaving.value = false;
+  }
 };
 
 const loadData = async () => {

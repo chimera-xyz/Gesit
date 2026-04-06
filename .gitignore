@@ -16,6 +16,8 @@
 /public/build
 /public/hot
 /public/storage
+/tmp
+/GESIT_*.pdf
 /storage/*.key
 /storage/pail
 /vendor

@@ -79,7 +79,7 @@
     $formatCurrencyIdr = fn (float $value): string => number_format($value, 0, ',', '.');
 
     $formData = $submission->form_data ?? [];
-    $formFields = $submission->form?->form_config['fields'] ?? [];
+    $formFields = $submission->resolvedFormConfig()['fields'] ?? [];
     $approvalSteps = $submission->approvalSteps->sortBy('step_number')->values();
     $itStep = $approvalSteps->firstWhere('approver_role', 'IT Staff');
     $directorStep = $approvalSteps->firstWhere('approver_role', 'Operational Director');
@@ -131,6 +131,48 @@
     $displayPrice = $amount > 0 ? $formatCurrencyIdr($pricePerUnit) : '';
     $displayAmount = $amount > 0 ? $formatCurrencyIdr($amount) : '';
     $displayTotal = $amount > 0 ? $formatCurrencyIdr($amount) : '';
+    $approvedStep = $approvalSteps
+        ->filter(fn ($step) => in_array($step->approver_role, ['Operational Director', 'Accounting'], true))
+        ->sortByDesc('step_number')
+        ->first(fn ($step) => $step->signature_id !== null || filled(optional($step->approver)->name))
+        ?? $directorStep
+        ?? $accountingStep;
+    $layout = $layout ?? [
+        'total' => [
+            'x' => 479.8,
+            'y' => 411.9,
+            'width' => 54.0,
+        ],
+        'signatures' => [
+            'prepared' => [322.0, 468.0, 60.0, 12.0],
+            'checked' => [446.0, 471.0, 50.0, 12.0],
+            'approved' => [322.0, 525.0, 60.0, 12.0],
+        ],
+        'names' => [
+            'prepared' => [
+                'x' => 309.0,
+                'y' => 500.6,
+                'width' => 92.0,
+                'size' => 7.0,
+            ],
+            'checked' => [
+                'x' => 428.0,
+                'y' => 500.6,
+                'width' => 92.0,
+                'size' => 7.0,
+            ],
+            'approved' => [
+                'x' => 309.0,
+                'y' => 555.0,
+                'width' => 108.0,
+                'size' => 7.0,
+            ],
+        ],
+    ];
+    $preparedName = trim((string) $requesterName);
+    $checkedName = $itName;
+    $approvedName = optional(optional($approvedStep)->approver)->name ?? '';
+    $approvedSignature = $signatureToDataUri(optional($approvedStep)->signature);
 @endphp
 <!DOCTYPE html>
 <html lang="id">
@@ -213,7 +255,6 @@
         .name-line {
             position: absolute;
             z-index: 2;
-            font-size: 6.7pt;
             font-weight: 700;
             text-align: center;
             line-height: 1.1;
@@ -240,25 +281,22 @@
         <div class="field mask value-bold value-lg" style="left: 56.9pt; top: 218.2pt; width: 204pt; min-height: 12pt;">{{ $itemName }}</div>
         <div class="field mask value-sm" style="left: 51.8pt; top: 248.6pt; width: 244pt; height: 118pt; line-height: 1.17;">{{ $specificationText }}</div>
 
-        <div class="field mask value-md align-center" style="left: 318.9pt; top: 218.2pt; width: 10pt;">{{ $displayQuantity }}</div>
-        <div class="field mask value-md" style="left: 361.9pt; top: 218.2pt; width: 48pt;">{{ $displayPrice }}</div>
-        <div class="field mask value-md" style="left: 486.2pt; top: 218.2pt; width: 48pt;">{{ $displayAmount }}</div>
-        <div class="field mask value-md" style="left: 486.2pt; top: 412.8pt; width: 48pt;">{{ $displayTotal }}</div>
+        <div class="field mask value-md align-center" style="left: 438.2pt; top: 218.2pt; width: 10pt;">{{ $displayQuantity }}</div>
+        <div class="field mask value-md" style="left: 481.2pt; top: 218.2pt; width: 48pt;">{{ $displayPrice }}</div>
+        <div class="field mask value-md" style="left: 364.1pt; top: 218.2pt; width: 48pt;">{{ $displayAmount }}</div>
 
-        @if($accountingSignature)
-            <img class="signature" src="{{ $accountingSignature }}" alt="Accounting signature" style="left: 325pt; top: 455pt; width: 78pt; height: 22pt;">
-        @endif
-        <div class="name-line" style="left: 323pt; top: 481.6pt; width: 90pt;">{{ $accountingName }}</div>
+        <div class="field mask value-md value-bold align-right" style="left: {{ $layout['total']['x'] }}pt; top: {{ $layout['total']['y'] }}pt; width: {{ $layout['total']['width'] }}pt;">{{ $displayTotal }}</div>
 
         @if($itSignature)
-            <img class="signature" src="{{ $itSignature }}" alt="IT signature" style="left: 448pt; top: 455pt; width: 74pt; height: 22pt;">
+            <img class="signature" src="{{ $itSignature }}" alt="Checked signature" style="left: {{ $layout['signatures']['checked'][0] }}pt; top: {{ $layout['signatures']['checked'][1] }}pt; width: {{ $layout['signatures']['checked'][2] }}pt; height: {{ $layout['signatures']['checked'][3] }}pt;">
         @endif
-        <div class="name-line" style="left: 441pt; top: 481.6pt; width: 90pt;">{{ $itName }}</div>
+        @if($approvedSignature)
+            <img class="signature" src="{{ $approvedSignature }}" alt="Approved signature" style="left: {{ $layout['signatures']['approved'][0] }}pt; top: {{ $layout['signatures']['approved'][1] }}pt; width: {{ $layout['signatures']['approved'][2] }}pt; height: {{ $layout['signatures']['approved'][3] }}pt;">
+        @endif
 
-        @if($directorSignature)
-            <img class="signature" src="{{ $directorSignature }}" alt="Director signature" style="left: 328pt; top: 509pt; width: 78pt; height: 22pt;">
-        @endif
-        <div class="name-line" style="left: 320pt; top: 535.7pt; width: 104pt;">{{ $directorName }}</div>
+        <div class="name-line" style="left: {{ $layout['names']['prepared']['x'] }}pt; top: {{ $layout['names']['prepared']['y'] }}pt; width: {{ $layout['names']['prepared']['width'] }}pt; font-size: {{ $layout['names']['prepared']['size'] }}pt;">{{ $preparedName }}</div>
+        <div class="name-line" style="left: {{ $layout['names']['checked']['x'] }}pt; top: {{ $layout['names']['checked']['y'] }}pt; width: {{ $layout['names']['checked']['width'] }}pt; font-size: {{ $layout['names']['checked']['size'] }}pt;">{{ $checkedName }}</div>
+        <div class="name-line" style="left: {{ $layout['names']['approved']['x'] }}pt; top: {{ $layout['names']['approved']['y'] }}pt; width: {{ $layout['names']['approved']['width'] }}pt; font-size: {{ $layout['names']['approved']['size'] }}pt;">{{ $approvedName }}</div>
     </div>
 </body>
 </html>

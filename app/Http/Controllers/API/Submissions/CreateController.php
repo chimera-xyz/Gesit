@@ -19,7 +19,10 @@ class CreateController extends Controller
     public function create()
     {
         try {
-            $forms = Form::with('workflow')->get();
+            $forms = Form::with('workflow')
+                ->where('is_active', true)
+                ->orderBy('name')
+                ->get();
 
             if ($forms->isEmpty()) {
                 return response()->json([
@@ -103,6 +106,12 @@ class CreateController extends Controller
     {
         try {
             $form = Form::with('workflow')->findOrFail($id);
+
+            if (!$form->is_active) {
+                return response()->json([
+                    'error' => 'Form tidak aktif dan belum bisa digunakan.',
+                ], 404);
+            }
 
             // Check if user has permission to submit forms
             if (!auth()->user()->can('submit forms')) {

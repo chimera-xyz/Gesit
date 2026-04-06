@@ -4,7 +4,7 @@
       <div>
         <p class="text-xs font-semibold uppercase tracking-[0.24em] text-[#a57e3a]">Admin Form Builder</p>
         <h1 class="mt-2 text-3xl font-bold text-gray-900">{{ isEditing ? 'Edit Form' : 'Buat Form Baru' }}</h1>
-        <p class="mt-2 text-gray-600">Susun field secara drag-and-drop lalu hubungkan ke workflow yang sudah tersedia.</p>
+        <p class="mt-2 text-gray-600">Susun form secara drag-and-drop lalu hubungkan ke workflow yang sudah tersedia.</p>
       </div>
 
       <router-link to="/forms" class="btn-secondary">Kembali ke daftar form</router-link>
@@ -40,6 +40,13 @@
               rows="4"
               placeholder="Jelaskan tujuan form ini dan siapa yang akan menggunakannya."
             ></textarea>
+          </div>
+
+          <div class="lg:col-span-2">
+            <label class="flex items-center gap-3 rounded-2xl border border-gray-200 px-4 py-3">
+              <input v-model="form.is_active" type="checkbox">
+              <span class="text-sm text-gray-700">Form aktif dan bisa dipilih user saat submit</span>
+            </label>
           </div>
         </div>
       </section>
@@ -151,7 +158,7 @@
           <div class="flex items-center justify-between gap-3">
             <div>
               <h2 class="text-lg font-semibold text-gray-900">Canvas Form</h2>
-              <p class="mt-1 text-sm text-gray-500">Urutan field di sini akan menjadi urutan form di halaman user.</p>
+              <p class="mt-1 text-sm text-gray-500">Urutan form di sini akan menjadi urutan form di halaman user.</p>
             </div>
             <span class="rounded-full bg-[#fbf5ea] px-3 py-1 text-xs font-semibold text-[#8f6115]">
               {{ builderFields.length }} field
@@ -291,6 +298,7 @@ const form = ref({
   name: '',
   description: '',
   workflow_id: '',
+  is_active: true,
 });
 
 const availableFieldTypes = [
@@ -330,6 +338,7 @@ const normalizeOptions = (optionsText) =>
     .filter(Boolean);
 
 const supportsOptions = (type) => ['select', 'radio', 'checkbox'].includes(type);
+const fieldIdPattern = /^[A-Za-z0-9_-]+$/;
 
 const selectField = (fieldUid) => {
   selectedFieldId.value = fieldUid;
@@ -390,9 +399,9 @@ const onDragEnd = () => {
 const serializeFields = () =>
   builderFields.value.map((field) => {
     const payload = {
-      id: field.id,
+      id: field.id.trim(),
       type: field.type,
-      label: field.label,
+      label: field.label.trim(),
       placeholder: field.placeholder,
       default: field.default,
       required: field.required,
@@ -423,6 +432,53 @@ const hydrateFields = (fields = []) =>
     optionsText: Array.isArray(field.options) ? field.options.join(', ') : (field.options || ''),
   }));
 
+const validateBuilder = () => {
+  const trimmedName = form.value.name.trim();
+
+  if (!trimmedName) {
+    return 'Nama form wajib diisi.';
+  }
+
+  if (!form.value.workflow_id) {
+    return 'Workflow wajib dipilih.';
+  }
+
+  if (builderFields.value.length === 0) {
+    return 'Tambahkan minimal satu field.';
+  }
+
+  const seenFieldIds = new Set();
+
+  for (const field of builderFields.value) {
+    const fieldId = field.id.trim();
+    const fieldLabel = field.label.trim();
+
+    if (!fieldLabel) {
+      return 'Semua field harus punya label.';
+    }
+
+    if (!fieldId) {
+      return 'Semua field harus punya Field ID.';
+    }
+
+    if (!fieldIdPattern.test(fieldId)) {
+      return 'Field ID hanya boleh berisi huruf, angka, tanda hubung, atau underscore.';
+    }
+
+    if (seenFieldIds.has(fieldId)) {
+      return `Field ID "${fieldId}" dipakai lebih dari sekali.`;
+    }
+
+    seenFieldIds.add(fieldId);
+
+    if (supportsOptions(field.type) && normalizeOptions(field.optionsText).length === 0) {
+      return `Field "${fieldLabel}" membutuhkan minimal satu opsi.`;
+    }
+  }
+
+  return null;
+};
+
 const loadWorkflows = async () => {
   const response = await axios.get('/api/workflows');
   workflows.value = response.data.workflows || [];
@@ -442,6 +498,7 @@ const loadForm = async () => {
     name: payload.name || '',
     description: payload.description || '',
     workflow_id: payload.workflow_id || '',
+    is_active: Boolean(payload.is_active),
   };
   builderFields.value = hydrateFields(payload.form_config?.fields || []);
   selectedFieldId.value = builderFields.value[0]?.uid || null;
@@ -452,15 +509,23 @@ const saveForm = async () => {
     return;
   }
 
+  const validationError = validateBuilder();
+
+  if (validationError) {
+    alert(validationError);
+    return;
+  }
+
   isSaving.value = true;
 
   try {
     const payload = {
       ...form.value,
+      name: form.value.name.trim(),
+      description: form.value.description.trim(),
       form_config: {
         fields: serializeFields(),
       },
-      is_active: true,
     };
 
     if (route.params.id) {

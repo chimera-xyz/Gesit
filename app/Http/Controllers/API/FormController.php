@@ -4,9 +4,10 @@ namespace App\Http\Controllers\API;
 
 use App\Http\Controllers\Controller;
 use App\Models\Form;
+use App\Models\User;
 use Illuminate\Http\Request;
-use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class FormController extends Controller
 {
@@ -16,9 +17,11 @@ class FormController extends Controller
     public function index()
     {
         try {
-            $query = Form::with('workflow')->orderBy('name');
+            $query = Form::with('workflow')
+                ->withCount('submissions')
+                ->orderBy('name');
 
-            if (!auth()->user()?->can('create forms')) {
+            if (!$this->canManageForms(auth()->user())) {
                 $query->where('is_active', true);
             }
 
@@ -39,7 +42,15 @@ class FormController extends Controller
     public function show($id)
     {
         try {
-            $form = Form::with(['workflow', 'submissions'])->findOrFail($id);
+            $form = Form::with('workflow')
+                ->withCount('submissions')
+                ->findOrFail($id);
+
+            if (!$form->is_active && !$this->canManageForms(auth()->user())) {
+                return response()->json([
+                    'error' => 'Form tidak aktif.',
+                ], 404);
+            }
 
             return response()->json([
                 'form' => $form,
@@ -60,6 +71,7 @@ class FormController extends Controller
                 'name' => 'required|string|max:255|unique:forms',
                 'description' => 'sometimes|string|max:1000',
                 'form_config' => 'required|array',
+                'form_config.fields' => 'required|array|min:1',
                 'workflow_id' => 'nullable|exists:workflows,id',
                 'is_active' => 'sometimes|boolean',
             ]);
@@ -88,6 +100,7 @@ class FormController extends Controller
                 'name' => 'sometimes|string|max:255|unique:forms,name,' . $id,
                 'description' => 'sometimes|string|max:1000',
                 'form_config' => 'sometimes|array',
+                'form_config.fields' => 'sometimes|array|min:1',
                 'workflow_id' => 'nullable|exists:workflows,id',
                 'is_active' => 'sometimes|boolean',
             ]);
@@ -122,9 +135,9 @@ class FormController extends Controller
             $form = Form::findOrFail($id);
 
             // Check if form has submissions
-            if ($form->submissions()->count() > 0) {
+            if ($form->submissions()->exists()) {
                 return response()->json([
-                    'error' => 'Cannot delete form with existing submissions',
+                    'error' => 'Form yang sudah punya pengajuan tidak bisa dihapus permanen. Nonaktifkan form ini jika sudah tidak dipakai.',
                 ], 400);
             }
 
@@ -158,5 +171,14 @@ class FormController extends Controller
         }
 
         return $slug;
+    }
+
+    private function canManageForms(?User $user): bool
+    {
+        if (!$user) {
+            return false;
+        }
+
+        return $user->hasRole('Admin');
     }
 }

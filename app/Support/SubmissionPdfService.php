@@ -90,6 +90,7 @@ class SubmissionPdfService
         }
 
         $data = $this->buildLayoutData($submission);
+        $layout = $this->pdfLayout();
         $pdf = new Fpdi('P', 'pt');
         $pdf->SetAutoPageBreak(false);
         $pdf->setSourceFile($templatePath);
@@ -102,7 +103,7 @@ class SubmissionPdfService
         $pdf->SetTextColor(0, 0, 0);
         $pdf->SetFillColor(255, 255, 255);
 
-        foreach ($this->wipeBoxes($data) as [$x, $y, $width, $height]) {
+        foreach ($this->wipeBoxes($data, $layout) as [$x, $y, $width, $height]) {
             $pdf->Rect($x, $y, $width, $height, 'F');
         }
 
@@ -118,16 +119,25 @@ class SubmissionPdfService
         $this->drawText($pdf, 318.94, 218.18, $data['quantity'], '', 8.7, 8, 'C');
         $this->drawText($pdf, 361.86, 218.18, $data['price'], '', 8.7, 54);
         $this->drawText($pdf, 486.18, 218.18, $data['amount'], '', 8.7, 52);
-        $this->drawText($pdf, 479.80, 411.90, $data['total'], 'B', 8.7, 54, 'R');
+        $this->drawText(
+            $pdf,
+            $layout['total']['x'],
+            $layout['total']['y'],
+            $data['total'],
+            'B',
+            $layout['total']['size'],
+            $layout['total']['width'],
+            'R'
+        );
         $this->drawMultiLineText($pdf, 51.8, 248.52, 244, 10.36, $data['specifications'], '', 7.7);
 
-        $this->drawSignature($pdf, $data['accounting_signature'], 317, 470, 70, 8);
-        $this->drawSignature($pdf, $data['it_signature'], 436, 470, 68, 8);
-        $this->drawSignature($pdf, $data['director_signature'], 318, 525, 70, 8);
+        $this->drawSignature($pdf, $data['prepared_signature'], ...$layout['signatures']['prepared']);
+        $this->drawSignature($pdf, $data['checked_signature'], ...$layout['signatures']['checked']);
+        $this->drawSignature($pdf, $data['approved_signature'], ...$layout['signatures']['approved']);
 
-        $this->drawText($pdf, 327.82, 483.40, $data['accounting_name'], 'B', 7.0, 78, 'C');
-        $this->drawText($pdf, 447.50, 483.40, $data['it_name'], 'B', 7.0, 80, 'C');
-        $this->drawText($pdf, 333.00, 537.30, $data['director_name'], 'B', 7.0, 90, 'C');
+        $this->drawFittedText($pdf, $layout['names']['prepared'], $data['prepared_name']);
+        $this->drawFittedText($pdf, $layout['names']['checked'], $data['checked_name']);
+        $this->drawFittedText($pdf, $layout['names']['approved'], $data['approved_name']);
 
         $pdf->Output('F', $absolutePath);
     }
@@ -142,6 +152,7 @@ class SubmissionPdfService
         $pdf = PDF::loadView('pdf.template', [
             'submission' => $submission,
             'templateImagePath' => $templateImagePath,
+            'layout' => $this->pdfLayout(),
         ])->setPaper('a4', 'portrait');
 
         $pdf->save($absolutePath);
@@ -150,7 +161,7 @@ class SubmissionPdfService
     private function buildLayoutData(FormSubmission $submission): array
     {
         $formData = (array) ($submission->form_data ?? []);
-        $formFields = $submission->form?->form_config['fields'] ?? [];
+        $formFields = $submission->resolvedFormConfig()['fields'] ?? [];
         $approvalSteps = $submission->approvalSteps->sortBy('step_number')->values();
 
         $itStep = $approvalSteps->firstWhere('approver_role', 'IT Staff');
@@ -160,6 +171,12 @@ class SubmissionPdfService
             ->sortByDesc('step_number')
             ->first(fn (ApprovalStep $step) => $step->signature_id !== null)
             ?? $approvalSteps->where('approver_role', 'Accounting')->sortByDesc('step_number')->first();
+        $approvedStep = $approvalSteps
+            ->filter(fn (ApprovalStep $step) => in_array($step->approver_role, ['Operational Director', 'Accounting'], true))
+            ->sortByDesc('step_number')
+            ->first(fn (ApprovalStep $step) => $step->signature_id !== null || filled(optional($step->approver)->name))
+            ?? $directorStep
+            ?? $accountingStep;
 
         $requestDate = $this->resolveFormValue(
             $formData,
@@ -258,16 +275,16 @@ class SubmissionPdfService
             'amount' => $amount > 0 ? $this->formatCurrency($amount) : '',
             'total' => $amount > 0 ? $this->formatCurrency($amount) : '',
             'specifications' => implode("\n", $specificationLines),
-            'accounting_name' => optional(optional($accountingStep)->approver)->name ?? '',
-            'it_name' => optional(optional($itStep)->approver)->name ?? '',
-            'director_name' => optional(optional($directorStep)->approver)->name ?? '',
-            'accounting_signature' => $this->signaturePath($accountingStep),
-            'it_signature' => $this->signaturePath($itStep),
-            'director_signature' => $this->signaturePath($directorStep),
+            'prepared_name' => trim((string) $requesterName),
+            'checked_name' => optional(optional($itStep)->approver)->name ?? '',
+            'approved_name' => optional(optional($approvedStep)->approver)->name ?? '',
+            'prepared_signature' => null,
+            'checked_signature' => $this->signaturePath($itStep),
+            'approved_signature' => $this->signaturePath($approvedStep),
         ];
     }
 
-    private function wipeBoxes(array $data): array
+    private function wipeBoxes(array $data, array $layout): array
     {
         $boxes = [
             [396, 109, 96, 12],
@@ -300,7 +317,8 @@ class SubmissionPdfService
         string $style,
         float $size,
         float $width,
-        string $align = 'L'
+        string $align = 'L',
+        string $font = 'Courier'
     ): void {
         $text = trim($text);
 
@@ -308,7 +326,7 @@ class SubmissionPdfService
             return;
         }
 
-        $pdf->SetFont('Courier', $style, $size);
+        $pdf->SetFont($font, $style, $size);
         $pdf->SetXY($x, $y);
         $pdf->Cell($width, $size + 1.4, $this->encodeText($text), 0, 0, $align);
     }
@@ -321,7 +339,8 @@ class SubmissionPdfService
         float $lineHeight,
         string $text,
         string $style,
-        float $size
+        float $size,
+        string $font = 'Courier'
     ): void {
         $text = trim($text);
 
@@ -329,9 +348,36 @@ class SubmissionPdfService
             return;
         }
 
-        $pdf->SetFont('Courier', $style, $size);
+        $pdf->SetFont($font, $style, $size);
         $pdf->SetXY($x, $y);
         $pdf->MultiCell($width, $lineHeight, $this->encodeText($text), 0, 'L');
+    }
+
+    private function drawFittedText(Fpdi $pdf, array $layout, string $text): void
+    {
+        $text = trim($text);
+
+        if ($text === '') {
+            return;
+        }
+
+        $encoded = $this->encodeText($text);
+        $font = $layout['font'] ?? 'Courier';
+        $style = $layout['style'] ?? 'B';
+        $maxSize = (float) ($layout['size'] ?? 7.0);
+        $minSize = (float) ($layout['min_size'] ?? 5.8);
+        $width = (float) $layout['width'];
+        $size = $maxSize;
+
+        $pdf->SetFont($font, $style, $size);
+
+        while ($size > $minSize && $pdf->GetStringWidth($encoded) > $width) {
+            $size = max($minSize, round($size - 0.2, 1));
+            $pdf->SetFont($font, $style, $size);
+        }
+
+        $pdf->SetXY((float) $layout['x'], (float) $layout['y']);
+        $pdf->Cell($width, $size + 1.4, $encoded, 0, 0, $layout['align'] ?? 'C');
     }
 
     private function drawSignature(Fpdi $pdf, ?string $path, float $x, float $y, float $width, float $height): void
@@ -340,7 +386,23 @@ class SubmissionPdfService
             return;
         }
 
-        $pdf->Image($path, $x, $y, $width, $height);
+        $imageSize = @getimagesize($path);
+
+        if (!$imageSize || empty($imageSize[0]) || empty($imageSize[1])) {
+            $pdf->Image($path, $x, $y, $width, $height);
+
+            return;
+        }
+
+        $sourceWidth = (float) $imageSize[0];
+        $sourceHeight = (float) $imageSize[1];
+        $scale = min($width / $sourceWidth, $height / $sourceHeight);
+        $drawWidth = max(1.0, round($sourceWidth * $scale, 2));
+        $drawHeight = max(1.0, round($sourceHeight * $scale, 2));
+        $drawX = $x + (($width - $drawWidth) / 2);
+        $drawY = $y + (($height - $drawHeight) / 2);
+
+        $pdf->Image($path, $drawX, $drawY, $drawWidth, $drawHeight);
     }
 
     private function signaturePath(?ApprovalStep $step): ?string
@@ -441,5 +503,51 @@ class SubmissionPdfService
     private function templatePdfPath(): string
     {
         return dirname(base_path()) . '/Template Form Requisition.pdf';
+    }
+
+    private function pdfLayout(): array
+    {
+        return [
+            'total' => [
+                'x' => 479.8,
+                'y' => 411.9,
+                'width' => 54.0,
+                'size' => 8.7,
+            ],
+            'signatures' => [
+                'prepared' => [322.0, 468.0, 60.0, 12.0],
+                'checked' => [446.0, 471.0, 50.0, 12.0],
+                'approved' => [322.0, 525.0, 60.0, 12.0],
+            ],
+            'names' => [
+                'prepared' => [
+                    'x' => 309.0,
+                    'y' => 500.6,
+                    'width' => 92.0,
+                    'size' => 7.0,
+                    'min_size' => 5.9,
+                    'align' => 'C',
+                    'style' => 'B',
+                ],
+                'checked' => [
+                    'x' => 428.0,
+                    'y' => 500.6,
+                    'width' => 92.0,
+                    'size' => 7.0,
+                    'min_size' => 5.9,
+                    'align' => 'C',
+                    'style' => 'B',
+                ],
+                'approved' => [
+                    'x' => 309.0,
+                    'y' => 555.0,
+                    'width' => 108.0,
+                    'size' => 7.0,
+                    'min_size' => 5.9,
+                    'align' => 'C',
+                    'style' => 'B',
+                ],
+            ],
+        ];
     }
 }

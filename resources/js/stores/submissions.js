@@ -1,12 +1,20 @@
 import { defineStore } from 'pinia';
 import axios from 'axios';
 
+const emptyPagination = () => ({
+    current_page: 1,
+    per_page: 15,
+    total: 0,
+    last_page: 1,
+});
+
 export const useSubmissionStore = defineStore('submissions', {
     state: () => ({
         submissions: [],
         activeSubmission: null,
         approvalSteps: [],
         pendingCount: 0,
+        pagination: emptyPagination(),
     }),
 
     getters: {
@@ -40,11 +48,19 @@ export const useSubmissionStore = defineStore('submissions', {
     },
 
     actions: {
-        async fetchSubmissions() {
+        applyCollectionPayload(payload) {
+            this.submissions = payload.submissions || [];
+            this.pagination = {
+                ...emptyPagination(),
+                ...(payload.pagination || {}),
+            };
+            this.pendingCount = this.getPendingSubmissions.length;
+        },
+
+        async fetchSubmissions(params = {}) {
             try {
-                const response = await axios.get('/api/form-submissions');
-                this.submissions = response.data.submissions || [];
-                this.pendingCount = this.getPendingSubmissions.length;
+                const response = await axios.get('/api/form-submissions', { params });
+                this.applyCollectionPayload(response.data);
                 return response.data;
             } catch (error) {
                 console.error('Error fetching submissions:', error);

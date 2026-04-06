@@ -27,6 +27,12 @@ const router = createRouter({
             meta: { requiresAuth: true, requiresPermission: 'create forms' }
         },
         {
+            path: '/forms/:id/edit',
+            name: 'forms-edit',
+            component: () => import('./components/Forms/Builder.vue'),
+            meta: { requiresAuth: true, requiresPermission: 'edit forms' }
+        },
+        {
             path: '/forms/:id',
             name: 'form-view',
             component: () => import('./components/Forms/View.vue'),
@@ -51,10 +57,40 @@ const router = createRouter({
             meta: { requiresAuth: true, requiresPermission: 'view submissions' }
         },
         {
+            path: '/helpdesk',
+            name: 'helpdesk',
+            component: () => import('./components/Helpdesk/Index.vue'),
+            meta: { requiresAuth: true, requiresPermission: 'view helpdesk tickets' }
+        },
+        {
+            path: '/helpdesk/:id',
+            name: 'helpdesk-detail',
+            component: () => import('./components/Helpdesk/Detail.vue'),
+            meta: { requiresAuth: true, requiresPermission: 'view helpdesk tickets' }
+        },
+        {
             path: '/profile',
             name: 'profile',
             component: () => import('./components/Profile.vue'),
             meta: { requiresAuth: true }
+        },
+        {
+            path: '/settings',
+            name: 'settings',
+            component: () => import('./components/Settings.vue'),
+            meta: { requiresAuth: true, requiresRole: 'Admin' }
+        },
+        {
+            path: '/users',
+            name: 'users',
+            component: () => import('./components/Users/Index.vue'),
+            meta: { requiresAuth: true, requiresRole: 'Admin' }
+        },
+        {
+            path: '/roles',
+            name: 'roles',
+            component: () => import('./components/Roles/Index.vue'),
+            meta: { requiresAuth: true, requiresRole: 'Admin' }
         },
         {
             path: '/login',

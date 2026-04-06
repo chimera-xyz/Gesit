@@ -18,6 +18,7 @@ class FormSubmission extends Model
         'form_id',
         'user_id',
         'form_data',
+        'form_snapshot',
         'current_status',
         'current_step',
         'pdf_path',
@@ -32,6 +33,7 @@ class FormSubmission extends Model
      */
     protected $casts = [
         'form_data' => 'array',
+        'form_snapshot' => 'array',
     ];
 
     /**
@@ -64,5 +66,17 @@ class FormSubmission extends Model
     public function creator()
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    /**
+     * Resolve the field schema captured when the submission was created.
+     */
+    public function resolvedFormConfig(): array
+    {
+        if (is_array($this->form_snapshot) && $this->form_snapshot !== []) {
+            return $this->form_snapshot;
+        }
+
+        return is_array($this->form?->form_config) ? $this->form->form_config : [];
     }
 }

@@ -73,10 +73,20 @@
               <div class="p-2">
                 <router-link
                   to="/profile"
+                  @click="showUserMenu = false"
                   class="block rounded-2xl px-4 py-3 text-sm text-secondary-700 transition-colors duration-200 hover:bg-[#fbf5ea] hover:text-[#8f6115]"
                   role="menuitem"
                 >
                   Profil Saya
+                </router-link>
+                <router-link
+                  v-if="authStore.isAdmin"
+                  to="/settings"
+                  @click="showUserMenu = false"
+                  class="block rounded-2xl px-4 py-3 text-sm text-secondary-700 transition-colors duration-200 hover:bg-[#fbf5ea] hover:text-[#8f6115]"
+                  role="menuitem"
+                >
+                  Setting
                 </router-link>
                 <button
                   @click="logout"
@@ -109,7 +119,7 @@
               <div>
                 <p class="text-xs font-semibold uppercase tracking-[0.28em] text-primary-700">Pusat Aktivitas</p>
                 <h2 id="slide-over-title" class="mt-2 text-2xl font-semibold text-secondary-900">Notifikasi</h2>
-                <p class="mt-2 text-sm leading-6 text-secondary-600">Pantau approval, perubahan status, dan arahan terbaru tanpa perlu berpindah halaman.</p>
+                <p class="mt-2 text-sm leading-6 text-secondary-600">Pantau approval, perubahan status.</p>
               </div>
 
               <button
@@ -172,7 +182,7 @@
                   <div
                     :class="[
                       'flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl',
-                      getNotificationMeta(notification.type).chipClass,
+                      getNotificationMeta(notification).chipClass,
                     ]"
                   >
                     <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -180,7 +190,7 @@
                         stroke-linecap="round"
                         stroke-linejoin="round"
                         stroke-width="1.8"
-                        :d="getNotificationMeta(notification.type).iconPath"
+                        :d="getNotificationMeta(notification).iconPath"
                       />
                     </svg>
                   </div>
@@ -189,7 +199,7 @@
                     <div class="flex items-start justify-between gap-3">
                       <div>
                         <p class="text-sm font-semibold text-secondary-900">{{ notification.title }}</p>
-                        <p class="mt-1 text-xs font-medium uppercase tracking-[0.2em] text-secondary-400">{{ getNotificationMeta(notification.type).label }}</p>
+                        <p class="mt-1 text-xs font-medium uppercase tracking-[0.2em] text-secondary-400">{{ getNotificationMeta(notification).label }}</p>
                       </div>
                       <span v-if="!notification.is_read" class="mt-1 h-2.5 w-2.5 shrink-0 rounded-full bg-primary-600"></span>
                     </div>
@@ -202,6 +212,84 @@
           </div>
         </div>
       </div>
+    </div>
+
+    <div
+      v-if="showShell"
+      class="pointer-events-none fixed right-4 top-24 z-[60] w-[min(24rem,calc(100%-2rem))]"
+    >
+      <transition
+        enter-active-class="transition duration-300 ease-out"
+        enter-from-class="translate-y-3 opacity-0 scale-95"
+        enter-to-class="translate-y-0 opacity-100 scale-100"
+        leave-active-class="transition duration-300 ease-in"
+        leave-from-class="translate-y-0 opacity-100 scale-100"
+        leave-to-class="translate-y-2 opacity-0 scale-95"
+      >
+        <article
+          v-if="activeToast"
+          :key="activeToast.id"
+          class="pointer-events-auto relative overflow-hidden rounded-[28px] border border-[#e8dcc9] bg-white shadow-[0_20px_48px_rgba(41,28,9,0.14)]"
+        >
+          <div class="absolute inset-x-0 top-0 h-1 overflow-hidden bg-[#f3e4bf]">
+            <div
+              :key="`toast-progress-${activeToast.id}`"
+              class="toast-progress-bar h-full w-full bg-gradient-to-r from-[#d4b06a] via-[#9b6b17] to-[#7e5715]"
+              :style="{ animationDuration: `${toastDurationMs}ms` }"
+            ></div>
+          </div>
+
+          <button
+            type="button"
+            @click="handleToastClick(activeToast)"
+            class="block w-full px-5 pb-5 pt-6 text-left transition hover:bg-[#fffdf9]"
+          >
+            <div class="flex items-start gap-4 pr-9">
+              <div
+                :class="[
+                  'flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl',
+                  getNotificationMeta(activeToast).chipClass,
+                ]"
+              >
+                <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="1.8"
+                    :d="getNotificationMeta(activeToast).iconPath"
+                  />
+                </svg>
+              </div>
+
+              <div class="min-w-0 flex-1">
+                <div class="flex items-start justify-between gap-3">
+                  <div>
+                    <p class="text-sm font-semibold text-secondary-900">{{ activeToast.title }}</p>
+                    <p class="mt-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-[#a57e3a]">
+                      {{ getNotificationMeta(activeToast).label }}
+                    </p>
+                  </div>
+                  <span class="mt-1 h-2.5 w-2.5 shrink-0 rounded-full bg-primary-600"></span>
+                </div>
+
+                <p class="mt-3 text-sm leading-6 text-secondary-600">{{ activeToast.message }}</p>
+                <p class="mt-3 text-xs font-medium text-secondary-400">{{ formatDate(activeToast.created_at) }}</p>
+              </div>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            @click.stop="dismissActiveToast"
+            class="absolute right-3 top-3 inline-flex h-9 w-9 items-center justify-center rounded-2xl text-secondary-400 transition hover:bg-[#fbf5ea] hover:text-[#8f6115]"
+          >
+            <span class="sr-only">Tutup notifikasi</span>
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.9" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </article>
+      </transition>
     </div>
 
     <main :class="showShell ? 'pb-4 pt-8 sm:pt-10' : ''">
@@ -231,10 +319,10 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
-import { useNotificationStore } from '../stores/notifications';
+import { TOAST_DURATION_MS, useNotificationStore } from '../stores/notifications';
 
 const router = useRouter();
 const route = useRoute();
@@ -245,8 +333,10 @@ const companyLogo = '/logoyulie.png';
 const showNotifications = ref(false);
 const showUserMenu = ref(false);
 const notificationLoading = ref(false);
+const toastDurationMs = TOAST_DURATION_MS;
 
 const showShell = computed(() => authStore.isAuthenticated && !route.meta.guestOnly);
+const activeToast = computed(() => notificationStore.activeToast);
 
 const navigation = computed(() => {
   const items = [
@@ -259,6 +349,14 @@ const navigation = computed(() => {
 
   if (authStore.hasPermission('view submissions')) {
     items.push({ name: 'submissions', label: 'Pengajuan Saya', to: '/submissions' });
+  }
+
+  if (authStore.hasPermission('view helpdesk tickets')) {
+    items.push({
+      name: 'helpdesk',
+      label: authStore.hasRole('IT Staff') ? 'Panel IT' : 'Bantuan IT',
+      to: '/helpdesk',
+    });
   }
 
   return items;
@@ -301,7 +399,14 @@ const isCurrentRoute = (item) => {
   return route.path.startsWith(item.to);
 };
 
-const getNotificationMeta = (type) => {
+const getNotificationMeta = (notificationOrType) => {
+  const type = typeof notificationOrType === 'string'
+    ? notificationOrType
+    : notificationOrType?.type;
+  const link = typeof notificationOrType === 'object'
+    ? notificationOrType?.link
+    : null;
+
   const config = {
     form_submitted: {
       label: 'Pengajuan Baru',
@@ -338,6 +443,11 @@ const getNotificationMeta = (type) => {
       chipClass: 'bg-red-100 text-red-700',
       iconPath: 'M9.172 9.172 14.828 14.828M14.828 9.172l-5.656 5.656M21 12a9 9 0 11-18 0 9 9 0 0118 0Z',
     },
+    helpdesk: {
+      label: 'Helpdesk',
+      chipClass: 'bg-[#eef4ff] text-[#315ea8]',
+      iconPath: 'M18 10c0 3.866-3.134 7-7 7a6.98 6.98 0 0 1-4.285-1.464L3 16l.464-3.715A6.98 6.98 0 0 1 2 8c0-3.866 3.134-7 7-7s7 3.134 7 7Zm-7-2v2m0 4h.008V14H11v-.008Z',
+    },
     general: {
       label: 'Umum',
       chipClass: 'bg-secondary-100 text-secondary-700',
@@ -349,6 +459,10 @@ const getNotificationMeta = (type) => {
       iconPath: 'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0Z',
     },
   };
+
+  if ((type === 'general' || !type) && typeof link === 'string' && link.startsWith('/helpdesk/')) {
+    return config.helpdesk;
+  }
 
   return config[type] || config.general;
 };
@@ -368,7 +482,7 @@ const toggleNotifications = async () => {
   notificationLoading.value = true;
 
   try {
-    await notificationStore.fetchNotifications();
+    await notificationStore.fetchNotifications({ perPage: 20 });
   } finally {
     notificationLoading.value = false;
   }
@@ -406,6 +520,30 @@ const handleNotificationClick = async (notification) => {
   closeNotifications();
 };
 
+const dismissActiveToast = () => {
+  notificationStore.dismissActiveToast();
+};
+
+const handleToastClick = async (notification) => {
+  if (!notification) {
+    return;
+  }
+
+  try {
+    if (!notification.is_read) {
+      await notificationStore.markAsRead(notification.id);
+    } else {
+      notificationStore.removeNotificationFromToastState(notification.id);
+    }
+  } finally {
+    notificationStore.dismissActiveToast();
+  }
+
+  if (notification.link) {
+    router.push(notification.link);
+  }
+};
+
 const logout = async () => {
   await authStore.logout();
   showUserMenu.value = false;
@@ -419,15 +557,87 @@ const handleDocumentClick = (event) => {
   }
 };
 
-onMounted(() => {
-  if (authStore.isAuthenticated) {
-    notificationStore.fetchUnreadCount().catch(() => {});
+const syncNotifications = async (options = {}) => {
+  if (!authStore.isAuthenticated) {
+    return;
   }
 
+  try {
+    await notificationStore.syncLatest(options);
+  } catch (error) {
+    console.error('Error syncing notifications:', error);
+  }
+};
+
+const bootstrapNotifications = async (userId) => {
+  try {
+    await notificationStore.bootstrap(userId);
+  } catch (error) {
+    console.error('Error bootstrapping notifications:', error);
+  }
+};
+
+const handleVisibilityChange = () => {
+  if (!document.hidden) {
+    syncNotifications({ enqueueToasts: true }).catch(() => {});
+  }
+};
+
+const handleWindowFocus = () => {
+  syncNotifications({ enqueueToasts: true }).catch(() => {});
+};
+
+watch(
+  () => authStore.user?.id ?? null,
+  async (userId, previousUserId) => {
+    if (!userId) {
+      notificationStore.resetForUserChange(previousUserId, {
+        clearSurfaced: Boolean(previousUserId),
+      });
+      return;
+    }
+
+    if (userId !== previousUserId) {
+      await bootstrapNotifications(userId);
+      return;
+    }
+
+    await syncNotifications({ enqueueToasts: true });
+  },
+  { immediate: true }
+);
+
+onMounted(() => {
   document.addEventListener('click', handleDocumentClick);
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+  window.addEventListener('focus', handleWindowFocus);
 });
 
 onUnmounted(() => {
   document.removeEventListener('click', handleDocumentClick);
+  document.removeEventListener('visibilitychange', handleVisibilityChange);
+  window.removeEventListener('focus', handleWindowFocus);
+  notificationStore.stopPolling();
 });
 </script>
+
+<style>
+.toast-progress-bar {
+  transform-origin: left center;
+  animation-name: toast-progress-shrink;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
+@keyframes toast-progress-shrink {
+  from {
+    transform: scaleX(1);
+    opacity: 1;
+  }
+
+  to {
+    transform: scaleX(0);
+    opacity: 0.78;
+  }
+}
+</style>
