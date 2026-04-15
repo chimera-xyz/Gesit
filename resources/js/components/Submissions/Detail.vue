@@ -47,7 +47,7 @@
               </div>
               <div>
                 <dt class="text-gray-500">Role Aktif</dt>
-                <dd class="font-medium text-gray-900">{{ submission.current_pending_step?.approver_role || 'System' }}</dd>
+                <dd class="font-medium text-gray-900">{{ submission.current_pending_step?.actor_label || submission.current_pending_step?.approver_role || 'System' }}</dd>
               </div>
               <div>
                 <dt class="text-gray-500">Dibuat</dt>
@@ -61,11 +61,11 @@
               <div>
                 <h2 class="text-lg font-semibold text-gray-900">Isi Form</h2>
                 <p class="mt-1 text-sm text-gray-500">
-                  <span v-if="canEditForm">Anda sedang berada di tahap review IT, jadi field di bawah bisa direvisi sebelum approval.</span>
+                  <span v-if="canEditForm">Step aktif mengizinkan revisi data form sebelum approval disimpan.</span>
                   <span v-else>Field tampil read-only sesuai data pengajuan terakhir.</span>
                 </p>
               </div>
-              <span v-if="canEditForm" class="rounded-full bg-[#fbf5ea] px-3 py-1 text-xs font-semibold text-[#8f6115]">Mode revisi IT</span>
+              <span v-if="canEditForm" class="rounded-full bg-[#fbf5ea] px-3 py-1 text-xs font-semibold text-[#8f6115]">Mode revisi aktif</span>
             </div>
 
             <div class="mt-5 grid gap-4 md:grid-cols-2">
@@ -146,7 +146,7 @@
                 <div class="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <p class="text-sm font-semibold text-gray-900">Langkah {{ step.step_number }}: {{ step.step_name }}</p>
-                    <p class="mt-1 text-xs uppercase tracking-[0.18em] text-gray-500">{{ step.approver_role || 'System' }}</p>
+                    <p class="mt-1 text-xs uppercase tracking-[0.18em] text-gray-500">{{ step.actor_label || step.approver_role || 'System' }}</p>
                   </div>
                   <span class="status-badge" :class="getStepStatusClass(step.status)">
                     {{ formatStepStatus(step.status) }}
@@ -212,7 +212,7 @@
                   :disabled="isRejecting"
                   @click="rejectSubmission"
                 >
-                  {{ isRejecting ? 'Memproses...' : 'Tolak Pengajuan' }}
+                  {{ isRejecting ? 'Memproses...' : (activeAction.reject_label || 'Tolak Pengajuan') }}
                 </button>
 
                 <button
@@ -456,7 +456,7 @@ const formatStatus = (status) => {
     rejected: 'Ditolak',
   };
 
-  return labels[status] || status;
+  return labels[status] || humanizeToken(status);
 };
 
 const formatStepStatus = (status) => {
@@ -466,7 +466,7 @@ const formatStepStatus = (status) => {
     rejected: 'Ditolak',
   };
 
-  return labels[status] || status;
+  return labels[status] || humanizeToken(status);
 };
 
 const getStatusClass = (status) => {
@@ -480,7 +480,7 @@ const getStatusClass = (status) => {
     rejected: 'status-rejected',
   };
 
-  return map[status] || 'status-pending';
+  return map[status] || (status === 'completed' ? 'status-completed' : (status === 'rejected' ? 'status-rejected' : 'status-pending'));
 };
 
 const getStepStatusClass = (status) => {
@@ -496,4 +496,16 @@ const getStepStatusClass = (status) => {
 onMounted(() => {
   loadSubmission();
 });
+
+function humanizeToken(value) {
+  if (!value) {
+    return '-';
+  }
+
+  return String(value)
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
 </script>

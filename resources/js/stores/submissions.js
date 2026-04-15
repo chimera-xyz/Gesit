@@ -24,7 +24,7 @@ export const useSubmissionStore = defineStore('submissions', {
 
         getPendingSubmissions: (state) => {
             return state.submissions.filter(submission =>
-                ['submitted', 'pending_it', 'pending_director', 'pending_accounting', 'pending_payment'].includes(submission.current_status)
+                !['completed', 'rejected'].includes(submission.current_status)
             );
         },
 
@@ -36,13 +36,13 @@ export const useSubmissionStore = defineStore('submissions', {
 
         getApprovedSubmissions: (state) => {
             return state.submissions.filter(submission =>
-                ['completed'].includes(submission.current_status)
+                submission.current_status === 'completed'
             );
         },
 
         getRejectedSubmissions: (state) => {
             return state.submissions.filter(submission =>
-                ['rejected'].includes(submission.current_status)
+                submission.current_status === 'rejected'
             );
         },
     },

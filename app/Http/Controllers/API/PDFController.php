@@ -169,9 +169,22 @@ class PDFController extends Controller
         }
 
         $roles = $user->roles->pluck('name')->all();
+        $submission->loadMissing('approvalSteps');
 
-        return $submission->approvalSteps()
-            ->whereIn('approver_role', $roles)
-            ->exists();
+        return $submission->approvalSteps->contains(function ($step) use ($roles, $user) {
+            if ((int) $step->approver_id === (int) $user->id) {
+                return true;
+            }
+
+            if (($step->actor_type ?? null) === 'user') {
+                return (int) ($step->actor_value ?? 0) === (int) $user->id;
+            }
+
+            if (($step->actor_type ?? null) === 'role') {
+                return in_array($step->actor_value, $roles, true);
+            }
+
+            return in_array($step->approver_role, $roles, true);
+        });
     }
 }

@@ -236,6 +236,13 @@
                     d="M10.325 4.317a1.724 1.724 0 013.35 0 1.724 1.724 0 002.573 1.066 1.724 1.724 0 012.875 1.925 1.724 1.724 0 001.066 2.573 1.724 1.724 0 010 3.35 1.724 1.724 0 00-1.066 2.573 1.724 1.724 0 01-2.875 1.925 1.724 1.724 0 00-2.573 1.066 1.724 1.724 0 01-3.35 0 1.724 1.724 0 00-2.573-1.066 1.724 1.724 0 01-2.875-1.925 1.724 1.724 0 00-1.066-2.573 1.724 1.724 0 010-3.35 1.724 1.724 0 001.066-2.573 1.724 1.724 0 012.875-1.925 1.724 1.724 0 002.573-1.066ZM12 15.25a3.25 3.25 0 100-6.5 3.25 3.25 0 000 6.5Z"
                   />
                   <path
+                    v-else-if="action.icon === 'knowledge'"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="1.8"
+                    d="M12 6.75c-2.4-1.6-5.8-1.68-8.5-.2V18a.75.75 0 00.998.707c2.17-.75 4.82-.48 7.002.793 2.18-1.273 4.832-1.543 7.002-.793A.75.75 0 0021.5 18V6.55c-2.7-1.48-6.1-1.4-8.5.2Zm0 0v11.25"
+                  />
+                  <path
                     v-else
                     stroke-linecap="round"
                     stroke-linejoin="round"
@@ -349,6 +356,7 @@ const userRole = computed(() => authStore.roles[0] || 'Internal User');
 
 const canApprove = computed(() => authStore.canApprove);
 const canCreateHelpdesk = computed(() => authStore.hasPermission('create helpdesk tickets'));
+const canOpenKnowledgeHub = computed(() => authStore.hasPermission('view knowledge hub'));
 const isItStaff = computed(() => authStore.hasRole('IT Staff'));
 const helpdeskDashboardLabel = computed(() => isItStaff.value ? 'Panel IT' : 'Butuh Bantuan IT');
 const helpdeskFilters = computed(() => helpdeskStore.filters);
@@ -356,25 +364,41 @@ const helpdeskFilters = computed(() => helpdeskStore.filters);
 const quickActions = computed(() => {
   if (authStore.isAdmin) {
     return [
-      { id: 1, title: 'Buat form baru', description: 'Susun form internal baru untuk kebutuhan tim.', to: '/forms/builder', icon: 'form' },
-      { id: 2, title: 'Kelola form', description: 'Lihat dan rapikan daftar form yang tersedia.', to: '/forms', icon: 'list' },
+      canOpenKnowledgeHub.value
+        ? { id: 1, title: 'Knowledge Hub', description: 'Buka chat assistant dan Smart Document Hub internal.', to: '/knowledge-hub', icon: 'knowledge' }
+        : { id: 1, title: 'Buat form baru', description: 'Susun form internal baru untuk kebutuhan tim.', to: '/forms/builder', icon: 'form' },
+      { id: 2, title: 'AI Knowledge Settings', description: 'Atur knowledge umum, prompt per divisi, dan dokumen AI.', to: '/settings/knowledge-ai', icon: 'knowledge' },
       { id: 3, title: 'Setting aplikasi', description: 'Kelola user, role, dan pengaturan akses dari satu tempat.', to: '/settings', icon: 'settings' },
     ];
   }
 
   if (authStore.canApprove) {
-    return [
+    const actions = [
       { id: 1, title: 'Lihat approval saya', description: 'Buka daftar pengajuan yang perlu Anda review.', to: '/submissions', icon: 'approve' },
       { id: 2, title: 'Lihat form', description: 'Buka form yang tersedia untuk diajukan atau dicek.', to: '/forms', icon: 'list' },
-      { id: 3, title: 'Buka profil', description: 'Periksa informasi akun internal Anda.', to: '/profile', icon: 'chart' },
     ];
+
+    if (canOpenKnowledgeHub.value) {
+      actions.push({ id: 3, title: 'Knowledge Hub', description: 'Cari SOP dan tanya knowledge assistant.', to: '/knowledge-hub', icon: 'knowledge' });
+      return actions;
+    }
+
+    actions.push({ id: 4, title: 'Buka profil', description: 'Periksa informasi akun internal Anda.', to: '/profile', icon: 'chart' });
+    return actions;
   }
 
-  return [
+  const actions = [
     { id: 1, title: 'Buat pengajuan', description: 'Ajukan kebutuhan internal baru melalui form yang tersedia.', to: '/forms', icon: 'form' },
     { id: 2, title: 'Pengajuan saya', description: 'Pantau status dan riwayat permintaan Anda.', to: '/submissions', icon: 'list' },
-    { id: 3, title: 'Buka profil', description: 'Lihat informasi akun dan akses Anda.', to: '/profile', icon: 'chart' },
   ];
+
+  if (canOpenKnowledgeHub.value) {
+    actions.push({ id: 3, title: 'Knowledge Hub', description: 'Browse dokumen dan tanya AI berbasis knowledge internal.', to: '/knowledge-hub', icon: 'knowledge' });
+    return actions;
+  }
+
+  actions.push({ id: 4, title: 'Buka profil', description: 'Lihat informasi akun dan akses Anda.', to: '/profile', icon: 'chart' });
+  return actions;
 });
 
 const primaryAction = computed(() => quickActions.value[0] || null);
@@ -450,7 +474,7 @@ const formatStatus = (status) => {
     rejected: 'Ditolak',
   };
 
-  return labels[status] || status;
+  return labels[status] || humanizeToken(status);
 };
 
 const formatDate = (dateString) => {
@@ -468,6 +492,18 @@ const formatDate = (dateString) => {
 
 const navigateToAction = (to) => {
   router.push(to);
+};
+
+const humanizeToken = (value) => {
+  if (!value) {
+    return '-';
+  }
+
+  return String(value)
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (character) => character.toUpperCase());
 };
 
 const navigateToSubmission = (id) => {

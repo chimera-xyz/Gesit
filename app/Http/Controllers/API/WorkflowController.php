@@ -4,18 +4,29 @@ namespace App\Http\Controllers\API;
 
 use App\Http\Controllers\Controller;
 use App\Models\Workflow;
+use App\Support\WorkflowConfigService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class WorkflowController extends Controller
 {
+    public function __construct(
+        private readonly WorkflowConfigService $workflowConfigService,
+    ) {
+    }
+
     /**
      * Get all workflows
      */
     public function index()
     {
         try {
-            $workflows = Workflow::with('forms')->orderBy('created_at', 'desc')->get();
+            $workflows = Workflow::with('forms')
+                ->orderByDesc('updated_at')
+                ->get()
+                ->map(fn (Workflow $workflow) => $this->transformWorkflow($workflow))
+                ->values();
 
             return response()->json([
                 'workflows' => $workflows,
@@ -35,7 +46,7 @@ class WorkflowController extends Controller
             $workflow = Workflow::with(['forms', 'creator'])->findOrFail($id);
 
             return response()->json([
-                'workflow' => $workflow,
+                'workflow' => $this->transformWorkflow($workflow),
             ]);
         } catch (\Exception $e) {
             Log::error('Get Workflow Error: ' . $e->getMessage());
@@ -51,13 +62,14 @@ class WorkflowController extends Controller
         try {
             $validated = $request->validate([
                 'name' => 'required|string|max:255',
-                'slug' => 'required|string|max:255|unique:workflows',
+                'slug' => 'nullable|string|max:255|unique:workflows',
                 'description' => 'sometimes|string|max:1000',
                 'workflow_config' => 'required|array',
+                'is_active' => 'sometimes|boolean',
             ]);
 
-            // Validate workflow configuration structure
-            $this->validateWorkflowConfig($validated['workflow_config']);
+            $validated['slug'] = $this->generateUniqueSlug($request->string('slug')->value() ?: $validated['name']);
+            $validated['workflow_config'] = $this->workflowConfigService->normalizeForStorage($validated['workflow_config']);
 
             $validated['created_by'] = auth()->id();
 
@@ -65,7 +77,7 @@ class WorkflowController extends Controller
 
             return response()->json([
                 'success' => true,
-                'workflow' => $workflow,
+                'workflow' => $this->transformWorkflow($workflow->fresh(['forms', 'creator'])),
             ]);
         } catch (\Exception $e) {
             Log::error('Create Workflow Error: ' . $e->getMessage());
@@ -89,16 +101,22 @@ class WorkflowController extends Controller
 
             $workflow = Workflow::findOrFail($id);
 
-            // Validate workflow configuration structure
             if (isset($validated['workflow_config'])) {
-                $this->validateWorkflowConfig($validated['workflow_config']);
+                $validated['workflow_config'] = $this->workflowConfigService->normalizeForStorage($validated['workflow_config']);
+            }
+
+            if ($request->filled('slug') || array_key_exists('name', $validated)) {
+                $validated['slug'] = $this->generateUniqueSlug(
+                    $request->string('slug')->value() ?: ($validated['name'] ?? $workflow->name),
+                    $workflow->id
+                );
             }
 
             $workflow->update($validated);
 
             return response()->json([
                 'success' => true,
-                'workflow' => $workflow,
+                'workflow' => $this->transformWorkflow($workflow->fresh(['forms', 'creator'])),
             ]);
         } catch (\Exception $e) {
             Log::error('Update Workflow Error: ' . $e->getMessage());
@@ -117,7 +135,7 @@ class WorkflowController extends Controller
             // Check if workflow has forms
             if ($workflow->forms()->count() > 0) {
                 return response()->json([
-                    'error' => 'Cannot delete workflow with existing forms',
+                    'error' => 'Workflow yang masih dipakai form tidak bisa dihapus.',
                 ], 400);
             }
 
@@ -125,7 +143,7 @@ class WorkflowController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Workflow deleted successfully',
+                'message' => 'Workflow berhasil dihapus.',
             ]);
         } catch (\Exception $e) {
             Log::error('Delete Workflow Error: ' . $e->getMessage());
@@ -133,65 +151,44 @@ class WorkflowController extends Controller
         }
     }
 
-    /**
-     * Validate workflow configuration structure
-     */
-    private function validateWorkflowConfig($workflowConfig)
+    private function transformWorkflow(Workflow $workflow): array
     {
-        $requiredKeys = ['steps', 'statuses'];
+        $workflow->loadMissing(['forms', 'creator']);
+        $steps = $workflow->workflow_config['steps'] ?? [];
 
-        foreach ($requiredKeys as $key) {
-            if (!isset($workflowConfig[$key]) || !is_array($workflowConfig[$key])) {
-                throw new \Exception("Invalid workflow configuration: {$key} must be an array");
-            }
-
-            if ($key === 'steps') {
-                $this->validateWorkflowSteps($workflowConfig['steps']);
-            }
-
-            if ($key === 'statuses') {
-                $this->validateWorkflowStatuses($workflowConfig['statuses']);
-            }
-        }
+        return [
+            'id' => $workflow->id,
+            'name' => $workflow->name,
+            'slug' => $workflow->slug,
+            'description' => $workflow->description,
+            'is_active' => (bool) $workflow->is_active,
+            'workflow_config' => $workflow->workflow_config,
+            'steps_count' => count($steps),
+            'forms_count' => $workflow->forms->count(),
+            'created_by' => $workflow->created_by,
+            'creator_name' => $workflow->creator?->name,
+            'created_at' => optional($workflow->created_at)?->toISOString(),
+            'updated_at' => optional($workflow->updated_at)?->toISOString(),
+        ];
     }
 
-    /**
-     * Validate workflow steps structure
-     */
-    private function validateWorkflowSteps($steps)
+    private function generateUniqueSlug(string $source, ?int $ignoreId = null): string
     {
-        $requiredStepKeys = ['step_number', 'name', 'role', 'action', 'status'];
+        $baseSlug = Str::slug($source);
+        $slugBase = $baseSlug !== '' ? $baseSlug : 'workflow';
+        $slug = $slugBase;
+        $counter = 2;
 
-        foreach ($steps as $index => $step) {
-            foreach ($requiredStepKeys as $key) {
-                if (!isset($step[$key])) {
-                    throw new \Exception("Step {$index}: Missing required field: {$key}");
-                }
-            }
-
-            if (!is_numeric($step['step_number'])) {
-                throw new \Exception("Step {$index}: step_number must be numeric");
-            }
-
-            if (!is_string($step['action']) || trim($step['action']) === '') {
-                throw new \Exception("Step {$index}: action must be a non-empty string");
-            }
-
-            if (!is_string($step['status']) || trim($step['status']) === '') {
-                throw new \Exception("Step {$index}: status must be a non-empty string");
-            }
+        while (
+            Workflow::query()
+                ->where('slug', $slug)
+                ->when($ignoreId, fn ($query) => $query->where('id', '!=', $ignoreId))
+                ->exists()
+        ) {
+            $slug = "{$slugBase}-{$counter}";
+            $counter++;
         }
-    }
 
-    /**
-     * Validate workflow statuses structure
-     */
-    private function validateWorkflowStatuses($statuses)
-    {
-        foreach ($statuses as $index => $status) {
-            if (!is_string($status) || trim($status) === '') {
-                throw new \Exception("Status {$index}: status must be a non-empty string");
-            }
-        }
+        return $slug;
     }
 }

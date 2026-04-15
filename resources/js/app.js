@@ -69,6 +69,71 @@ const router = createRouter({
             meta: { requiresAuth: true, requiresPermission: 'view helpdesk tickets' }
         },
         {
+            path: '/it-activities',
+            name: 'it-activities',
+            component: () => import('./components/ItActivities/Index.vue'),
+            meta: { requiresAuth: true, requiresPermission: 'view it activities' }
+        },
+        {
+            path: '/knowledge-hub',
+            component: () => import('./components/Knowledge/Hub.vue'),
+            meta: { requiresAuth: true, requiresPermission: 'view knowledge hub' },
+            children: [
+                {
+                    path: '',
+                    redirect: { name: 'knowledge-hub-chat' },
+                },
+                {
+                    path: 'chat',
+                    name: 'knowledge-hub-chat',
+                    component: () => import('./components/Knowledge/HubChatView.vue'),
+                },
+                {
+                    path: 'documents',
+                    name: 'knowledge-hub-documents',
+                    component: () => import('./components/Knowledge/HubDocumentsView.vue'),
+                },
+            ],
+        },
+        {
+            path: '/settings/knowledge-ai',
+            component: () => import('./components/Knowledge/Admin.vue'),
+            meta: { requiresAuth: true, requiresPermission: 'manage knowledge hub' },
+            children: [
+                {
+                    path: '',
+                    redirect: { name: 'knowledge-admin-overview' },
+                },
+                {
+                    path: 'overview',
+                    name: 'knowledge-admin-overview',
+                    component: () => import('./components/Knowledge/AdminOverviewView.vue'),
+                },
+                {
+                    path: 'general',
+                    name: 'knowledge-admin-general',
+                    component: () => import('./components/Knowledge/AdminGeneralView.vue'),
+                },
+                {
+                    path: 'divisions',
+                    name: 'knowledge-admin-divisions',
+                    component: () => import('./components/Knowledge/AdminDivisionsView.vue'),
+                },
+                {
+                    path: 'spaces',
+                    redirect: { name: 'knowledge-admin-divisions' },
+                },
+                {
+                    path: 'sections',
+                    redirect: { name: 'knowledge-admin-divisions' },
+                },
+                {
+                    path: 'entries',
+                    redirect: { name: 'knowledge-admin-divisions' },
+                },
+            ],
+        },
+        {
             path: '/profile',
             name: 'profile',
             component: () => import('./components/Profile.vue'),
@@ -91,6 +156,12 @@ const router = createRouter({
             name: 'roles',
             component: () => import('./components/Roles/Index.vue'),
             meta: { requiresAuth: true, requiresRole: 'Admin' }
+        },
+        {
+            path: '/workflows',
+            name: 'workflows',
+            component: () => import('./components/Workflows/Index.vue'),
+            meta: { requiresAuth: true, requiresPermission: 'manage workflows' }
         },
         {
             path: '/login',

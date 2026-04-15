@@ -163,9 +163,19 @@ class SignatureController extends Controller
     {
         $approvalStep = ApprovalStep::findOrFail($approvalStepId);
         $user = auth()->user();
+        $actorType = $approvalStep->actor_type ?? ($approvalStep->config_snapshot['actor_type'] ?? null);
+        $actorValue = $approvalStep->actor_value ?? ($approvalStep->config_snapshot['actor_value'] ?? null);
 
-        if (!$user->hasRole('Admin') && !$user->hasRole($approvalStep->approver_role)) {
-            abort(403, 'Unauthorized');
+        if (!$user->hasRole('Admin')) {
+            $authorized = match ($actorType) {
+                'user' => (int) $actorValue === (int) $user->id,
+                'role' => $actorValue !== null && $user->hasRole($actorValue),
+                default => $approvalStep->approver_role !== null && $user->hasRole($approvalStep->approver_role),
+            };
+
+            if (!$authorized) {
+                abort(403, 'Unauthorized');
+            }
         }
 
         if ($approvalStep->status !== 'pending') {

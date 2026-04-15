@@ -260,7 +260,7 @@ const formatStatus = (status) => {
     rejected: 'Ditolak',
   };
 
-  return labels[status] || status;
+  return labels[status] || humanizeToken(status);
 };
 
 const getStatusClass = (status) => {
@@ -275,6 +275,18 @@ const getStatusClass = (status) => {
   };
 
   return map[status] || 'status-pending';
+};
+
+const humanizeToken = (value) => {
+  if (!value) {
+    return '-';
+  }
+
+  return String(value)
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (character) => character.toUpperCase());
 };
 
 watch([searchQuery, statusFilter, formFilter], () => {

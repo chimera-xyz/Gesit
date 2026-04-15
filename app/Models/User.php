@@ -135,4 +135,20 @@ class User extends Authenticatable
     {
         return $this->hasMany(HelpdeskTicketUpdate::class);
     }
+
+    /**
+     * Get bookmarked knowledge entries for this user.
+     */
+    public function knowledgeBookmarks()
+    {
+        return $this->hasMany(KnowledgeBookmark::class);
+    }
+
+    /**
+     * Get knowledge assistant conversations for this user.
+     */
+    public function knowledgeConversations()
+    {
+        return $this->hasMany(KnowledgeConversation::class);
+    }
 }

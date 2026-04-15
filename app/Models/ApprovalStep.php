@@ -17,12 +17,17 @@ class ApprovalStep extends Model
     protected $fillable = [
         'form_submission_id',
         'step_number',
+        'step_key',
         'step_name',
         'approver_role',
+        'actor_type',
+        'actor_value',
+        'actor_label',
         'approver_id',
         'status',
         'notes',
         'signature_id',
+        'config_snapshot',
         'approved_at',
     ];
 
@@ -33,6 +38,7 @@ class ApprovalStep extends Model
      */
     protected $casts = [
         'approved_at' => 'datetime',
+        'config_snapshot' => 'array',
     ];
 
     /**

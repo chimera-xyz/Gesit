@@ -48,7 +48,7 @@
           >
             <p class="text-xs font-semibold uppercase tracking-[0.18em] text-[#a57e3a]">Step {{ step.step_number }}</p>
             <p class="mt-2 text-sm font-semibold text-gray-900">{{ step.name }}</p>
-            <p class="mt-2 text-xs text-gray-500">{{ step.role }}</p>
+            <p class="mt-2 text-xs text-gray-500">{{ step.actor_label || step.actor_value || step.role || 'System' }}</p>
           </div>
         </div>
       </section>

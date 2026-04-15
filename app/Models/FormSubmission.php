@@ -19,6 +19,7 @@ class FormSubmission extends Model
         'user_id',
         'form_data',
         'form_snapshot',
+        'workflow_snapshot',
         'current_status',
         'current_step',
         'pdf_path',
@@ -34,6 +35,7 @@ class FormSubmission extends Model
     protected $casts = [
         'form_data' => 'array',
         'form_snapshot' => 'array',
+        'workflow_snapshot' => 'array',
     ];
 
     /**
@@ -78,5 +80,17 @@ class FormSubmission extends Model
         }
 
         return is_array($this->form?->form_config) ? $this->form->form_config : [];
+    }
+
+    /**
+     * Resolve the workflow schema captured when the submission was created.
+     */
+    public function resolvedWorkflowConfig(): array
+    {
+        if (is_array($this->workflow_snapshot) && $this->workflow_snapshot !== []) {
+            return $this->workflow_snapshot;
+        }
+
+        return is_array($this->form?->workflow?->workflow_config) ? $this->form->workflow->workflow_config : [];
     }
 }

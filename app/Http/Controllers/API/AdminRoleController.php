@@ -224,6 +224,10 @@ class AdminRoleController extends Controller
                         if (($step['role'] ?? null) === $roleName) {
                             return true;
                         }
+
+                        if (($step['actor_type'] ?? null) === 'role' && ($step['actor_value'] ?? null) === $roleName) {
+                            return true;
+                        }
                     }
 
                     return false;
@@ -286,12 +290,16 @@ class AdminRoleController extends Controller
                 $changed = false;
 
                 foreach ($steps as $index => $step) {
-                    if (($step['role'] ?? null) !== $oldName) {
-                        continue;
+                    if (($step['role'] ?? null) === $oldName) {
+                        $steps[$index]['role'] = $newName;
+                        $changed = true;
                     }
 
-                    $steps[$index]['role'] = $newName;
-                    $changed = true;
+                    if (($step['actor_type'] ?? null) === 'role' && ($step['actor_value'] ?? null) === $oldName) {
+                        $steps[$index]['actor_value'] = $newName;
+                        $steps[$index]['actor_label'] = $newName;
+                        $changed = true;
+                    }
                 }
 
                 if (!$changed) {

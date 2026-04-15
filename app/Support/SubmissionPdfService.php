@@ -163,20 +163,25 @@ class SubmissionPdfService
         $formData = (array) ($submission->form_data ?? []);
         $formFields = $submission->resolvedFormConfig()['fields'] ?? [];
         $approvalSteps = $submission->approvalSteps->sortBy('step_number')->values();
+        $humanApprovalSteps = $approvalSteps
+            ->filter(function (ApprovalStep $step) {
+                $actorType = $step->actor_type ?? ($step->config_snapshot['actor_type'] ?? null);
 
-        $itStep = $approvalSteps->firstWhere('approver_role', 'IT Staff');
-        $directorStep = $approvalSteps->firstWhere('approver_role', 'Operational Director');
-        $accountingStep = $approvalSteps
-            ->where('approver_role', 'Accounting')
-            ->sortByDesc('step_number')
-            ->first(fn (ApprovalStep $step) => $step->signature_id !== null)
-            ?? $approvalSteps->where('approver_role', 'Accounting')->sortByDesc('step_number')->first();
-        $approvedStep = $approvalSteps
-            ->filter(fn (ApprovalStep $step) => in_array($step->approver_role, ['Operational Director', 'Accounting'], true))
+                return !in_array($actorType, ['requester', 'system'], true);
+            })
+            ->values();
+        $checkedStep = $humanApprovalSteps
+            ->first(fn (ApprovalStep $step) => $step->status === 'approved')
+            ?? $humanApprovalSteps->first();
+        $approvedStep = $humanApprovalSteps
+            ->filter(fn (ApprovalStep $step) => $step->status === 'approved')
             ->sortByDesc('step_number')
             ->first(fn (ApprovalStep $step) => $step->signature_id !== null || filled(optional($step->approver)->name))
-            ?? $directorStep
-            ?? $accountingStep;
+            ?? $humanApprovalSteps
+                ->where('status', 'approved')
+                ->sortByDesc('step_number')
+                ->first()
+            ?? $checkedStep;
 
         $requestDate = $this->resolveFormValue(
             $formData,
@@ -276,10 +281,10 @@ class SubmissionPdfService
             'total' => $amount > 0 ? $this->formatCurrency($amount) : '',
             'specifications' => implode("\n", $specificationLines),
             'prepared_name' => trim((string) $requesterName),
-            'checked_name' => optional(optional($itStep)->approver)->name ?? '',
+            'checked_name' => optional(optional($checkedStep)->approver)->name ?? '',
             'approved_name' => optional(optional($approvedStep)->approver)->name ?? '',
             'prepared_signature' => null,
-            'checked_signature' => $this->signaturePath($itStep),
+            'checked_signature' => $this->signaturePath($checkedStep),
             'approved_signature' => $this->signaturePath($approvedStep),
         ];
     }

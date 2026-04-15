@@ -10,6 +10,7 @@ use App\Models\Notification;
 use App\Models\Signature;
 use App\Models\User;
 use App\Support\SubmissionPdfService;
+use App\Support\WorkflowConfigService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -19,6 +20,7 @@ class FormSubmissionController extends Controller
 {
     public function __construct(
         private readonly SubmissionPdfService $pdfService,
+        private readonly WorkflowConfigService $workflowConfigService,
     ) {
     }
 
@@ -90,7 +92,7 @@ class FormSubmissionController extends Controller
 
             return response()->json([
                 'submission' => $this->transformSubmission($submission),
-                'workflow' => $submission->form?->workflow?->workflow_config,
+                'workflow' => $submission->resolvedWorkflowConfig(),
                 'available_actions' => $this->getAvailableActions($submission),
             ]);
         } catch (\Exception $e) {
@@ -111,6 +113,9 @@ class FormSubmissionController extends Controller
             ]);
 
             $form = Form::with('workflow')->findOrFail($validated['form_id']);
+            $workflowSnapshot = $form->workflow
+                ? $this->workflowConfigService->normalize((array) $form->workflow->workflow_config)
+                : [];
 
             if (!$form->is_active) {
                 return response()->json([
@@ -118,12 +123,13 @@ class FormSubmissionController extends Controller
                 ], 422);
             }
 
-            $submission = DB::transaction(function () use ($request, $form) {
+            $submission = DB::transaction(function () use ($request, $form, $workflowSnapshot) {
                 $submission = FormSubmission::create([
                     'form_id' => $form->id,
                     'user_id' => $request->user()->id,
                     'form_data' => [],
                     'form_snapshot' => $form->form_config,
+                    'workflow_snapshot' => $workflowSnapshot,
                     'current_status' => 'submitted',
                     'current_step' => 1,
                     'created_by' => $request->user()->id,
@@ -194,6 +200,12 @@ class FormSubmissionController extends Controller
                 $submission->save();
             }
 
+            if ($this->stepNotesRequired($stepConfig) && blank($validated['notes'] ?? null)) {
+                return response()->json([
+                    'error' => 'Catatan wajib diisi untuk langkah ini.',
+                ], 422);
+            }
+
             if ($this->stepRequiresSignature($stepConfig) && empty($validated['signature_id'])) {
                 return response()->json([
                     'error' => 'Signature is required for this approval step',
@@ -213,7 +225,7 @@ class FormSubmissionController extends Controller
             }
 
             $currentStep->fill([
-                'notes' => $validated['notes'] ?? null,
+                'notes' => filled($validated['notes'] ?? null) ? trim((string) $validated['notes']) : null,
                 'status' => 'approved',
                 'approver_id' => auth()->id(),
                 'approved_at' => now(),
@@ -271,6 +283,8 @@ class FormSubmissionController extends Controller
                 return response()->json(['error' => 'Unauthorized or invalid rejection step'], 403);
             }
 
+            $stepConfig = $this->stepConfigForApprovalStep($currentStep);
+
             $currentStep->fill([
                 'notes' => $validated['rejection_reason'],
                 'status' => 'rejected',
@@ -279,7 +293,8 @@ class FormSubmissionController extends Controller
             ])->save();
 
             $submission->update([
-                'current_status' => 'rejected',
+                'current_status' => $this->stepRejectStatus($stepConfig),
+                'current_step' => $currentStep->step_number,
                 'rejection_reason' => $validated['rejection_reason'],
             ]);
 
@@ -313,10 +328,24 @@ class FormSubmissionController extends Controller
             'approvalSteps.signature.user',
         ]);
 
+        $currentPendingStep = $this->getCurrentPendingApprovalStep($submission);
         $data = $submission->toArray();
         $data['form']['form_config'] = $submission->resolvedFormConfig();
+
+        if ($submission->form?->workflow) {
+            $data['form']['workflow'] = array_merge(
+                $data['form']['workflow'] ?? [],
+                ['workflow_config' => $this->getWorkflowConfig($submission)]
+            );
+        }
+
+        $data['workflow_snapshot'] = $this->getWorkflowConfig($submission);
         $data['available_actions'] = $this->getAvailableActions($submission);
-        $data['current_pending_step'] = $this->getCurrentPendingApprovalStep($submission)?->toArray();
+        $data['current_pending_step'] = $currentPendingStep
+            ? array_merge($currentPendingStep->toArray(), [
+                'actor_label' => $this->getStepActorLabel($currentPendingStep),
+            ])
+            : null;
         $data['pdf_preview_url'] = $this->pdfService->previewUrl($submission);
         $data['pdf_download_url'] = $this->pdfService->downloadUrl($submission);
         $data['can_preview_pdf'] = $submission->pdf_path !== null || $submission->current_status !== 'rejected';
@@ -463,67 +492,45 @@ class FormSubmissionController extends Controller
             return;
         }
 
-        $firstStep = $steps[0];
-
-        if (($firstStep['action'] ?? null) === 'submit') {
-            $this->storeApprovalStepFromConfig($submission, $firstStep, [
-                'status' => 'approved',
-                'approver_id' => $submission->user_id,
-                'approved_at' => $submission->created_at,
-                'notes' => 'Pengajuan dibuat oleh pemohon.',
-            ]);
-        }
-
-        $nextStep = $this->getNextActionableStep($submission, $firstStep['step_number'] ?? 0);
-
-        if ($nextStep) {
-            $this->storeApprovalStepFromConfig($submission, $nextStep, [
-                'status' => 'pending',
-            ]);
-
-            $submission->update([
-                'current_status' => $this->getStatusForStep($nextStep),
-                'current_step' => $nextStep['step_number'],
-            ]);
-
-            return;
-        }
-
-        $submission->update([
-            'current_status' => 'completed',
-            'current_step' => $firstStep['step_number'] ?? 1,
-        ]);
+        $this->activateWorkflowStepSequence($submission, $steps[0], $submission->created_at);
     }
 
     private function advanceWorkflow(FormSubmission $submission, ApprovalStep $currentStep): void
     {
-        $nextStep = $this->getNextActionableStep($submission, $currentStep->step_number);
+        $stepConfig = $this->stepConfigForApprovalStep($currentStep);
+        $nextStep = $this->resolveNextWorkflowStepConfig($submission, $stepConfig);
 
-        if ($nextStep) {
-            $this->storeApprovalStepFromConfig($submission, $nextStep, [
+        $this->activateWorkflowStepSequence($submission, $nextStep);
+    }
+
+    private function activateWorkflowStepSequence(FormSubmission $submission, ?array $stepConfig, mixed $referenceTime = null): void
+    {
+        while ($stepConfig) {
+            if ($this->isAutoStep($stepConfig)) {
+                $this->storeApprovalStepFromConfig($submission, $stepConfig, [
+                    'status' => 'approved',
+                    'approver_id' => $this->resolveAutoApproverId($submission, $stepConfig),
+                    'approved_at' => $referenceTime ?? now(),
+                    'notes' => $this->defaultAutoStepNotes($stepConfig),
+                ]);
+
+                $submission->update([
+                    'current_status' => $this->stepApproveStatus($stepConfig),
+                    'current_step' => $stepConfig['step_number'],
+                ]);
+
+                $referenceTime = now();
+                $stepConfig = $this->resolveNextWorkflowStepConfig($submission, $stepConfig);
+                continue;
+            }
+
+            $this->storeApprovalStepFromConfig($submission, $stepConfig, [
                 'status' => 'pending',
             ]);
 
             $submission->update([
-                'current_status' => $this->getStatusForStep($nextStep),
-                'current_step' => $nextStep['step_number'],
-            ]);
-
-            return;
-        }
-
-        $completionStep = $this->getNextWorkflowStep($submission, $currentStep->step_number);
-
-        if ($completionStep && ($completionStep['action'] ?? null) === 'complete') {
-            $this->storeApprovalStepFromConfig($submission, $completionStep, [
-                'status' => 'approved',
-                'approved_at' => now(),
-                'notes' => 'Workflow selesai secara otomatis.',
-            ]);
-
-            $submission->update([
-                'current_status' => $this->getStatusForStep($completionStep, 'completed'),
-                'current_step' => $completionStep['step_number'],
+                'current_status' => $this->stepEntryStatus($stepConfig),
+                'current_step' => $stepConfig['step_number'],
             ]);
 
             return;
@@ -531,7 +538,7 @@ class FormSubmissionController extends Controller
 
         $submission->update([
             'current_status' => 'completed',
-            'current_step' => $currentStep->step_number,
+            'current_step' => $submission->approvalSteps()->max('step_number') ?: 1,
         ]);
     }
 
@@ -543,11 +550,16 @@ class FormSubmissionController extends Controller
                 'step_number' => $stepConfig['step_number'],
             ],
             array_merge([
+                'step_key' => $stepConfig['step_key'] ?? null,
                 'step_name' => $stepConfig['name'] ?? 'Workflow Step',
-                'approver_role' => $stepConfig['role'] ?? 'System',
+                'approver_role' => $this->resolveApproverRoleLabel($stepConfig),
+                'actor_type' => $stepConfig['actor_type'] ?? null,
+                'actor_value' => $stepConfig['actor_value'] ?? null,
+                'actor_label' => $this->resolveActorLabelFromConfig($stepConfig),
                 'status' => 'pending',
                 'notes' => null,
                 'signature_id' => null,
+                'config_snapshot' => $stepConfig,
                 'approver_id' => null,
                 'approved_at' => null,
             ], $attributes)
@@ -564,36 +576,30 @@ class FormSubmissionController extends Controller
             ->first();
     }
 
-    private function getWorkflowSteps(FormSubmission $submission): array
+    private function getWorkflowConfig(FormSubmission $submission): array
     {
-        $steps = $submission->form?->workflow?->workflow_config['steps'] ?? [];
-
-        usort($steps, fn (array $left, array $right) => ($left['step_number'] ?? 0) <=> ($right['step_number'] ?? 0));
-
-        return $steps;
+        return $this->workflowConfigService->normalize($submission->resolvedWorkflowConfig());
     }
 
-    private function getNextActionableStep(FormSubmission $submission, int $afterStepNumber): ?array
+    private function getWorkflowSteps(FormSubmission $submission): array
     {
-        $steps = $this->getWorkflowSteps($submission);
+        return $this->getWorkflowConfig($submission)['steps'] ?? [];
+    }
 
-        foreach ($steps as $step) {
-            if (($step['step_number'] ?? 0) <= $afterStepNumber) {
-                continue;
-            }
+    private function resolveNextWorkflowStepConfig(FormSubmission $submission, array $stepConfig): ?array
+    {
+        $nextStepKey = trim((string) ($stepConfig['next_step_key'] ?? ''));
 
-            if (!$this->isAutoStep($step)) {
-                return $step;
+        if ($nextStepKey !== '') {
+            foreach ($this->getWorkflowSteps($submission) as $step) {
+                if (($step['step_key'] ?? null) === $nextStepKey) {
+                    return $step;
+                }
             }
         }
 
-        return null;
-    }
-
-    private function getNextWorkflowStep(FormSubmission $submission, int $afterStepNumber): ?array
-    {
         foreach ($this->getWorkflowSteps($submission) as $step) {
-            if (($step['step_number'] ?? 0) > $afterStepNumber) {
+            if ((int) ($step['step_number'] ?? 0) > (int) ($stepConfig['step_number'] ?? 0)) {
                 return $step;
             }
         }
@@ -607,9 +613,19 @@ class FormSubmissionController extends Controller
             || in_array($step['action'] ?? null, ['submit', 'complete'], true);
     }
 
-    private function getStatusForStep(array $step, string $fallback = 'pending'): string
+    private function stepEntryStatus(array $stepConfig): string
     {
-        return (string) ($step['status'] ?? $fallback);
+        return (string) ($stepConfig['entry_status'] ?? 'pending');
+    }
+
+    private function stepApproveStatus(array $stepConfig): string
+    {
+        return (string) ($stepConfig['approve_status'] ?? 'completed');
+    }
+
+    private function stepRejectStatus(array $stepConfig): string
+    {
+        return (string) ($stepConfig['reject_status'] ?? 'rejected');
     }
 
     private function getAvailableActions(FormSubmission $submission): array
@@ -620,14 +636,17 @@ class FormSubmissionController extends Controller
             return [];
         }
 
-        $stepConfig = $this->getWorkflowStepConfig($submission, $currentStep->step_number);
+        $stepConfig = $this->stepConfigForApprovalStep($currentStep);
 
         return [[
             'action' => $stepConfig['action'] ?? 'approve',
             'step_number' => $currentStep->step_number,
             'step_name' => $currentStep->step_name,
+            'actor_label' => $this->getStepActorLabel($currentStep),
             'label' => $stepConfig['cta_label'] ?? 'Setujui',
+            'reject_label' => $stepConfig['reject_label'] ?? 'Tolak',
             'notes_placeholder' => $stepConfig['notes_placeholder'] ?? 'Tambahkan catatan untuk langkah ini.',
+            'notes_required' => $this->stepNotesRequired($stepConfig),
             'can_reject' => auth()->user()?->can('reject forms') ?? false,
             'requires_signature' => $this->stepRequiresSignature($stepConfig),
             'can_edit_form' => $this->canReviseFormData($currentStep, auth()->user()),
@@ -645,6 +664,19 @@ class FormSubmissionController extends Controller
         return null;
     }
 
+    private function stepConfigForApprovalStep(ApprovalStep $step): array
+    {
+        if (is_array($step->config_snapshot) && $step->config_snapshot !== []) {
+            return $step->config_snapshot;
+        }
+
+        $step->loadMissing('formSubmission.form.workflow');
+
+        return $step->formSubmission
+            ? ($this->getWorkflowStepConfig($step->formSubmission, $step->step_number) ?? [])
+            : [];
+    }
+
     private function canActOnStep(ApprovalStep $step, User $user, string $permission): bool
     {
         if (!$user->can($permission)) {
@@ -655,7 +687,22 @@ class FormSubmissionController extends Controller
             return true;
         }
 
-        return $user->hasRole($step->approver_role);
+        return $this->userMatchesStepActor($step, $user);
+    }
+
+    private function userMatchesStepActor(ApprovalStep $step, User $user): bool
+    {
+        $step->loadMissing('formSubmission');
+
+        $actorType = $this->stepActorType($step);
+        $actorValue = $this->stepActorValue($step);
+
+        return match ($actorType) {
+            'requester' => (int) $step->formSubmission?->user_id === (int) $user->id,
+            'role' => $actorValue !== null && $user->hasRole($actorValue),
+            'user' => (int) $actorValue === (int) $user->id,
+            default => $step->approver_role !== null && $user->hasRole($step->approver_role),
+        };
     }
 
     private function userCanViewSubmission(FormSubmission $submission, User $user): bool
@@ -668,18 +715,10 @@ class FormSubmissionController extends Controller
             return true;
         }
 
-        $roles = $user->roles->pluck('name')->all();
+        $submission->loadMissing('approvalSteps.formSubmission');
 
-        if ($roles === []) {
-            return false;
-        }
-
-        return $submission->approvalSteps()
-            ->where(function (Builder $query) use ($roles, $user) {
-                $query->whereIn('approver_role', $roles)
-                    ->orWhere('approver_id', $user->id);
-            })
-            ->exists();
+        return $submission->approvalSteps
+            ->contains(fn (ApprovalStep $step) => $this->userMatchesStepActor($step, $user) || (int) $step->approver_id === (int) $user->id);
     }
 
     private function scopeVisibleSubmissions(Builder $query, User $user): void
@@ -691,14 +730,24 @@ class FormSubmissionController extends Controller
         $roles = $user->roles->pluck('name')->all();
 
         $query->where(function (Builder $submissionQuery) use ($user, $roles) {
-            $submissionQuery->where('user_id', $user->id);
+            $submissionQuery->where('user_id', $user->id)
+                ->orWhereHas('approvalSteps', function (Builder $approvalQuery) use ($user, $roles) {
+                    $approvalQuery->where('approver_id', $user->id)
+                        ->orWhere(function (Builder $actorQuery) use ($user) {
+                            $actorQuery->where('actor_type', 'user')
+                                ->where('actor_value', (string) $user->id);
+                        });
 
-            if ($roles !== []) {
-                $submissionQuery->orWhereHas('approvalSteps', function (Builder $approvalQuery) use ($roles, $user) {
-                    $approvalQuery->whereIn('approver_role', $roles)
-                        ->orWhere('approver_id', $user->id);
+                    if ($roles !== []) {
+                        $approvalQuery->orWhere(function (Builder $actorQuery) use ($roles) {
+                            $actorQuery->where('actor_type', 'role')
+                                ->whereIn('actor_value', $roles);
+                        })->orWhere(function (Builder $legacyQuery) use ($roles) {
+                            $legacyQuery->whereNull('actor_type')
+                                ->whereIn('approver_role', $roles);
+                        });
+                    }
                 });
-            }
         });
     }
 
@@ -723,6 +772,10 @@ class FormSubmissionController extends Controller
                     ->orWhere('email', 'like', "%{$search}%")
                     ->orWhere('department', 'like', "%{$search}%")
                     ->orWhere('employee_id', 'like', "%{$search}%");
+            })->orWhereHas('approvalSteps', function (Builder $approvalQuery) use ($search) {
+                $approvalQuery->where('step_name', 'like', "%{$search}%")
+                    ->orWhere('actor_label', 'like', "%{$search}%")
+                    ->orWhere('approver_role', 'like', "%{$search}%");
             });
 
             if (ctype_digit($search)) {
@@ -743,26 +796,44 @@ class FormSubmissionController extends Controller
             return [];
         }
 
-        $statusAliases = [
-            'submitted' => ['submitted', 'dikirim'],
-            'pending_it' => ['pending_it', 'pending it', 'it review', 'review it'],
-            'pending_director' => ['pending_director', 'pending director', 'pending direktur', 'direktur'],
-            'pending_accounting' => ['pending_accounting', 'pending accounting', 'proses accounting', 'accounting'],
-            'pending_payment' => ['pending_payment', 'pending payment', 'pending konfirmasi bayar', 'konfirmasi bayar', 'bayar'],
-            'completed' => ['completed', 'selesai'],
-            'rejected' => ['rejected', 'ditolak', 'tolak'],
-        ];
-
-        return collect($statusAliases)
-            ->filter(function (array $aliases) use ($normalizedSearch) {
-                return collect($aliases)->contains(function (string $alias) use ($normalizedSearch) {
-                    return str_contains($alias, $normalizedSearch)
-                        || str_contains($normalizedSearch, $alias);
-                });
-            })
-            ->keys()
+        return FormSubmission::query()
+            ->distinct()
+            ->pluck('current_status')
+            ->filter()
+            ->filter(fn (string $status) => $this->statusMatchesSearch($status, $normalizedSearch))
             ->values()
             ->all();
+    }
+
+    private function statusMatchesSearch(string $status, string $search): bool
+    {
+        $statusAliases = [
+            $status,
+            str_replace(['_', '-'], ' ', $status),
+        ];
+
+        if ($status === 'submitted') {
+            $statusAliases[] = 'dikirim';
+        }
+
+        if ($status === 'completed') {
+            $statusAliases[] = 'selesai';
+        }
+
+        if ($status === 'rejected') {
+            $statusAliases[] = 'ditolak';
+            $statusAliases[] = 'tolak';
+        }
+
+        foreach ($statusAliases as $alias) {
+            $normalizedAlias = mb_strtolower(trim($alias));
+
+            if (str_contains($normalizedAlias, $search) || str_contains($search, $normalizedAlias)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function getFormFields(Form $form): array
@@ -863,13 +934,72 @@ class FormSubmissionController extends Controller
             return (bool) $stepConfig['requires_signature'];
         }
 
-        return in_array($stepConfig['action'] ?? null, ['review', 'approve', 'mark_paid'], true);
+        return false;
+    }
+
+    private function stepNotesRequired(?array $stepConfig): bool
+    {
+        return (bool) ($stepConfig['notes_required'] ?? false);
     }
 
     private function canReviseFormData(ApprovalStep $currentStep, User $user): bool
     {
-        return $currentStep->approver_role === 'IT Staff'
-            && ($user->hasRole('Admin') || $user->hasRole('IT Staff'));
+        return $this->canActOnStep($currentStep, $user, 'approve forms')
+            && (bool) ($this->stepConfigForApprovalStep($currentStep)['allow_form_edit'] ?? false);
+    }
+
+    private function resolveAutoApproverId(FormSubmission $submission, array $stepConfig): ?int
+    {
+        return match ($stepConfig['actor_type'] ?? null) {
+            'requester' => $submission->user_id,
+            'user' => (int) ($stepConfig['actor_value'] ?? 0) ?: null,
+            default => null,
+        };
+    }
+
+    private function defaultAutoStepNotes(array $stepConfig): string
+    {
+        return match ($stepConfig['action'] ?? null) {
+            'submit' => 'Pengajuan dibuat oleh pemohon.',
+            'complete' => 'Workflow selesai secara otomatis.',
+            default => 'Langkah otomatis diproses sistem.',
+        };
+    }
+
+    private function stepActorType(ApprovalStep $step): ?string
+    {
+        return $step->actor_type
+            ?? ($step->config_snapshot['actor_type'] ?? null)
+            ?? ($step->approver_role ? 'role' : null);
+    }
+
+    private function stepActorValue(ApprovalStep $step): ?string
+    {
+        return $step->actor_value
+            ?? ($step->config_snapshot['actor_value'] ?? null)
+            ?? $step->approver_role;
+    }
+
+    private function getStepActorLabel(ApprovalStep $step): string
+    {
+        return $step->actor_label
+            ?? ($step->config_snapshot['actor_label'] ?? null)
+            ?? $step->approver_role
+            ?? 'System';
+    }
+
+    private function resolveApproverRoleLabel(array $stepConfig): string
+    {
+        return match ($stepConfig['actor_type'] ?? null) {
+            'role' => (string) ($stepConfig['actor_value'] ?? 'System'),
+            default => $this->resolveActorLabelFromConfig($stepConfig),
+        };
+    }
+
+    private function resolveActorLabelFromConfig(array $stepConfig): string
+    {
+        return (string) ($stepConfig['actor_label']
+            ?? $this->workflowConfigService->actorLabel($stepConfig));
     }
 
     private function notifySubmissionCreated(FormSubmission $submission): void
@@ -885,8 +1015,8 @@ class FormSubmissionController extends Controller
         );
 
         if ($currentStep) {
-            $this->notifyRoleUsers(
-                [$currentStep->approver_role],
+            $this->notifyStepActors(
+                $currentStep,
                 'approval_needed',
                 'Approval baru menunggu diproses',
                 "{$submission->user->name} mengajukan {$submission->form->name}. Silakan review pada langkah {$currentStep->step_name}.",
@@ -920,8 +1050,8 @@ class FormSubmissionController extends Controller
         }
 
         if ($currentStep) {
-            $this->notifyRoleUsers(
-                [$currentStep->approver_role],
+            $this->notifyStepActors(
+                $currentStep,
                 'approval_needed',
                 'Ada langkah baru yang menunggu tindakan',
                 "{$submission->form->name} sekarang ada di tahap {$currentStep->step_name}.",
@@ -941,12 +1071,35 @@ class FormSubmissionController extends Controller
         );
     }
 
-    private function notifyRoleUsers(array $roles, string $type, string $title, string $message, string $link): void
+    private function notifyStepActors(ApprovalStep $step, string $type, string $title, string $message, string $link): void
     {
-        User::query()
-            ->whereHas('roles', fn (Builder $query) => $query->whereIn('name', $roles))
-            ->get()
-            ->each(fn (User $user) => $this->createNotification($user->id, $title, $message, $type, $link));
+        foreach ($this->resolveNotificationRecipients($step) as $userId) {
+            $this->createNotification($userId, $title, $message, $type, $link);
+        }
+    }
+
+    private function resolveNotificationRecipients(ApprovalStep $step): array
+    {
+        $step->loadMissing('formSubmission');
+
+        return match ($this->stepActorType($step)) {
+            'role' => User::query()
+                ->where('is_active', true)
+                ->whereHas('roles', fn (Builder $query) => $query->where('name', $this->stepActorValue($step)))
+                ->pluck('id')
+                ->map(fn ($id) => (int) $id)
+                ->values()
+                ->all(),
+            'user' => User::query()
+                ->whereKey((int) $this->stepActorValue($step))
+                ->where('is_active', true)
+                ->pluck('id')
+                ->map(fn ($id) => (int) $id)
+                ->values()
+                ->all(),
+            'requester' => $step->formSubmission ? [(int) $step->formSubmission->user_id] : [],
+            default => [],
+        };
     }
 
     private function createNotification(int $userId, string $title, string $message, string $type, string $link): void

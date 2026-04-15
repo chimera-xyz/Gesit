@@ -35,4 +35,11 @@ return [
         ],
     ],
 
+    'zai' => [
+        'api_key' => env('ZAI_API_KEY'),
+        'base_url' => env('ZAI_BASE_URL', 'https://api.z.ai/api/paas/v4'),
+        'model' => env('ZAI_MODEL', 'glm-5.1'),
+        'timeout' => env('ZAI_TIMEOUT', 30),
+    ],
+
 ];

@@ -20,6 +20,7 @@ class DatabaseSeeder extends Seeder
             RoleSeeder::class,
             WorkflowSeeder::class,
             FormSeeder::class,
+            KnowledgeSeeder::class,
         ]);
 
         $admin = User::updateOrCreate([

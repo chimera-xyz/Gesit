@@ -15,6 +15,9 @@ use App\Http\Controllers\API\AdminUserController;
 use App\Http\Controllers\API\AdminRoleController;
 use App\Http\Controllers\API\NotificationController;
 use App\Http\Controllers\API\HelpdeskTicketController;
+use App\Http\Controllers\API\ItActivityController;
+use App\Http\Controllers\API\KnowledgeHubController;
+use App\Http\Controllers\API\AdminKnowledgeController;
 
 Route::middleware('web')->group(function () {
     Route::middleware('guest')->group(function () {
@@ -47,6 +50,47 @@ Route::middleware('web')->group(function () {
             ->middleware('role:Admin');
         Route::delete('/roles/{id}', [AdminRoleController::class, 'destroy'])
             ->middleware('role:Admin');
+        Route::get('/knowledge-admin', [AdminKnowledgeController::class, 'index'])
+            ->middleware('permission:manage knowledge hub');
+        Route::put('/knowledge-admin/general', [AdminKnowledgeController::class, 'updateGeneral'])
+            ->middleware('permission:manage knowledge hub');
+        Route::post('/knowledge-admin/spaces', [AdminKnowledgeController::class, 'storeSpace'])
+            ->middleware('permission:manage knowledge hub');
+        Route::put('/knowledge-admin/spaces/{id}', [AdminKnowledgeController::class, 'updateSpace'])
+            ->middleware('permission:manage knowledge hub');
+        Route::delete('/knowledge-admin/spaces/{id}', [AdminKnowledgeController::class, 'destroySpace'])
+            ->middleware('permission:manage knowledge hub');
+        Route::post('/knowledge-admin/sections', [AdminKnowledgeController::class, 'storeSection'])
+            ->middleware('permission:manage knowledge hub');
+        Route::put('/knowledge-admin/sections/{id}', [AdminKnowledgeController::class, 'updateSection'])
+            ->middleware('permission:manage knowledge hub');
+        Route::delete('/knowledge-admin/sections/{id}', [AdminKnowledgeController::class, 'destroySection'])
+            ->middleware('permission:manage knowledge hub');
+        Route::post('/knowledge-admin/entries', [AdminKnowledgeController::class, 'storeEntry'])
+            ->middleware('permission:manage knowledge hub');
+        Route::post('/knowledge-admin/entries/{id}', [AdminKnowledgeController::class, 'updateEntry'])
+            ->middleware('permission:manage knowledge hub');
+        Route::delete('/knowledge-admin/entries/{id}', [AdminKnowledgeController::class, 'destroyEntry'])
+            ->middleware('permission:manage knowledge hub');
+
+        Route::get('/knowledge-hub', [KnowledgeHubController::class, 'index'])
+            ->middleware('permission:view knowledge hub');
+        Route::get('/knowledge-hub/conversations', [KnowledgeHubController::class, 'conversations'])
+            ->middleware('permission:view knowledge hub');
+        Route::get('/knowledge-hub/conversations/{id}', [KnowledgeHubController::class, 'showConversation'])
+            ->middleware('permission:view knowledge hub');
+        Route::patch('/knowledge-hub/conversations/{id}', [KnowledgeHubController::class, 'updateConversation'])
+            ->middleware('permission:view knowledge hub');
+        Route::delete('/knowledge-hub/conversations/{id}', [KnowledgeHubController::class, 'destroyConversation'])
+            ->middleware('permission:view knowledge hub');
+        Route::post('/knowledge-hub/ask', [KnowledgeHubController::class, 'ask'])
+            ->middleware('permission:view knowledge hub');
+        Route::post('/knowledge-hub/entries/{id}/bookmark', [KnowledgeHubController::class, 'toggleBookmark'])
+            ->middleware('permission:view knowledge hub');
+        Route::post('/knowledge-hub/spaces/{spaceId}/folders', [KnowledgeHubController::class, 'storeFolder'])
+            ->middleware('permission:view knowledge hub');
+        Route::post('/knowledge-hub/spaces/{spaceId}/entries', [KnowledgeHubController::class, 'storeEntry'])
+            ->middleware('permission:view knowledge hub');
 
         // PDF Generation Routes
         Route::post('/pdf/generate/{id}', [PDFController::class, 'generate'])
@@ -123,6 +167,12 @@ Route::middleware('web')->group(function () {
             ->middleware('permission:view helpdesk tickets');
         Route::post('/helpdesk/tickets/{id}/updates', [HelpdeskTicketController::class, 'addUpdate'])
             ->middleware('permission:view helpdesk tickets');
+
+        // IT Activity Routes
+        Route::get('/it-activities', [ItActivityController::class, 'index'])
+            ->middleware('permission:view it activities');
+        Route::get('/it-activities/export', [ItActivityController::class, 'export'])
+            ->middleware('permission:export it activities');
 
         // Alternate submissions routes used by the frontend
         Route::get('/submissions', [IndexController::class, 'index'])

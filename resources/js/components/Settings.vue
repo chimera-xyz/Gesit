@@ -66,7 +66,7 @@ const settingMenus = [
   {
     id: 1,
     title: 'Manage User',
-    description: 'Tambah user baru, ubah data akun, atur multi-role, dan aktifkan atau arsipkan user internal.',
+    description: 'Tambah user baru, ubah data akun user internal.',
     to: '/users',
     icon: 'users',
     tags: ['User', 'Divisi', 'Status'],
@@ -74,10 +74,26 @@ const settingMenus = [
   {
     id: 2,
     title: 'Manage Role',
-    description: 'Buat role custom, sesuaikan permission, edit role yang ada, lalu nonaktifkan role bila sudah tidak dipakai.',
+    description: 'Buat role custom, sesuaikan permission',
     to: '/roles',
     icon: 'settings',
     tags: ['Role', 'Permission', 'Akses'],
+  },
+  {
+    id: 3,
+    title: 'Manage Workflow',
+    description: 'Bangun alur approval per SOP dengan actor fleksibel',
+    to: '/workflows',
+    icon: 'settings',
+    tags: ['Workflow', 'Approval', 'SOP'],
+  },
+  {
+    id: 4,
+    title: 'AI Knowledge Settings',
+    description: 'Atur general knowledge, prompt per divisi, dan dokumen yang dipakai GESIT Knowledge Assistant.',
+    to: '/settings/knowledge-ai',
+    icon: 'settings',
+    tags: ['Knowledge', 'AI', 'Divisi'],
   },
 ];
 </script>

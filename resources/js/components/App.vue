@@ -292,13 +292,13 @@
       </transition>
     </div>
 
-    <main :class="showShell ? 'pb-4 pt-8 sm:pt-10' : ''">
-      <div :class="showShell ? 'mx-auto max-w-7xl px-4 sm:px-6 lg:px-8' : ''">
+    <main :class="showShell ? mainShellClass : ''">
+      <div :class="showShell ? mainContentClass : ''">
         <router-view></router-view>
       </div>
     </main>
 
-    <footer v-if="showShell" class="mt-12 border-t border-[#efe5d7]">
+    <footer v-if="showFooter" class="mt-12 border-t border-[#efe5d7]">
       <div class="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
         <div class="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
           <div class="flex items-center gap-4">
@@ -336,6 +336,18 @@ const notificationLoading = ref(false);
 const toastDurationMs = TOAST_DURATION_MS;
 
 const showShell = computed(() => authStore.isAuthenticated && !route.meta.guestOnly);
+const isKnowledgeWorkspace = computed(() => route.path.startsWith('/knowledge-hub'));
+const mainShellClass = computed(() => (
+  isKnowledgeWorkspace.value
+    ? 'h-[calc(100dvh-5.5rem)] overflow-hidden pb-0 pt-5 sm:pt-6'
+    : 'pb-4 pt-8 sm:pt-10'
+));
+const mainContentClass = computed(() => (
+  isKnowledgeWorkspace.value
+    ? 'h-full w-full px-4 sm:px-6 lg:px-8'
+    : 'mx-auto max-w-7xl px-4 sm:px-6 lg:px-8'
+));
+const showFooter = computed(() => showShell.value && !isKnowledgeWorkspace.value);
 const activeToast = computed(() => notificationStore.activeToast);
 
 const navigation = computed(() => {
@@ -356,6 +368,22 @@ const navigation = computed(() => {
       name: 'helpdesk',
       label: authStore.hasRole('IT Staff') ? 'Panel IT' : 'Bantuan IT',
       to: '/helpdesk',
+    });
+  }
+
+  if (authStore.hasPermission('view knowledge hub')) {
+    items.push({
+      name: 'knowledge-hub',
+      label: 'Knowledge Hub',
+      to: '/knowledge-hub',
+    });
+  }
+
+  if (authStore.hasPermission('view it activities')) {
+    items.push({
+      name: 'it-activities',
+      label: 'Aktivitas IT',
+      to: '/it-activities',
     });
   }
 

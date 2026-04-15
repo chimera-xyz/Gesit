@@ -2,10 +2,9 @@
 
 namespace Database\Seeders;
 
-use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
-use Spatie\Permission\Models\Role;
 use Spatie\Permission\Models\Permission;
+use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
 
 class RoleSeeder extends Seeder
@@ -61,6 +60,10 @@ class RoleSeeder extends Seeder
             ['name' => 'view helpdesk tickets', 'guard_name' => 'web'],
             ['name' => 'create helpdesk tickets', 'guard_name' => 'web'],
             ['name' => 'manage helpdesk tickets', 'guard_name' => 'web'],
+            ['name' => 'view it activities', 'guard_name' => 'web'],
+            ['name' => 'export it activities', 'guard_name' => 'web'],
+            ['name' => 'view knowledge hub', 'guard_name' => 'web'],
+            ['name' => 'manage knowledge hub', 'guard_name' => 'web'],
         ];
 
         foreach ($permissions as $permission) {
@@ -71,7 +74,7 @@ class RoleSeeder extends Seeder
         $adminRole = Role::where('name', 'Admin')->first();
         $adminRole->syncPermissions(Permission::all());
 
-        $basePermissions = ['view forms', 'submit forms', 'view submissions', 'view helpdesk tickets', 'create helpdesk tickets'];
+        $basePermissions = ['view forms', 'submit forms', 'view submissions', 'view helpdesk tickets', 'create helpdesk tickets', 'view knowledge hub'];
 
         $itRole = Role::where('name', 'IT Staff')->first();
         $itRole->syncPermissions([
@@ -80,6 +83,8 @@ class RoleSeeder extends Seeder
             'reject forms',
             'create signatures',
             'manage helpdesk tickets',
+            'view it activities',
+            'export it activities',
         ]);
 
         $directorRole = Role::where('name', 'Operational Director')->first();
