@@ -17,6 +17,7 @@ export const useKnowledgeHubWorkspace = () => {
   const normalizeMessages = (items = []) => items.map((message) => ({
     ...message,
     sources: message.sources || [],
+    actions: message.actions || [],
   }));
   const withoutStarterMessage = (items = []) => normalizeMessages(items).filter((message) => !(
     message.role === 'assistant' && message.content === starterMessageContent
@@ -390,6 +391,13 @@ export const useKnowledgeHubWorkspace = () => {
       : 'Assistant sedang mengetik...'
   );
 
+  const buildAssistantMessage = (message = {}, scope = null) => ({
+    ...message,
+    sources: message?.sources || [],
+    actions: message?.actions || [],
+    scopeLabel: message?.scopeLabel || formatScopeLabel(scope),
+  });
+
   const submitQuestion = async (presetQuestion = '') => {
     const question = (presetQuestion || chatInput.value).trim();
 
@@ -421,12 +429,9 @@ export const useKnowledgeHubWorkspace = () => {
         {
           ...response.user_message,
           sources: response.user_message?.sources || [],
+          actions: response.user_message?.actions || [],
         },
-        {
-          ...response.assistant_message,
-          sources: response.assistant_message?.sources || [],
-          scopeLabel: response.assistant_message?.scopeLabel || formatScopeLabel(response.scope),
-        },
+        buildAssistantMessage(response.assistant_message, response.scope),
       ];
 
       knowledgeStore.syncConversationRecord(response.conversation, withoutStarterMessage(nextMessages));
@@ -448,6 +453,57 @@ export const useKnowledgeHubWorkspace = () => {
           role: 'assistant',
           content: message,
           sources: [],
+          actions: [],
+          scopeLabel: 'Error',
+        },
+      ];
+    } finally {
+      chatLoading.value = false;
+      chatLoadingMessage.value = '';
+    }
+  };
+
+  const runMessageAction = async (message, action) => {
+    if (!message?.id || !action?.key || !knowledgeStore.activeConversationId) {
+      return;
+    }
+
+    clearError();
+    chatLoading.value = true;
+    chatLoadingMessage.value = 'Menjalankan aksi...';
+
+    try {
+      const response = await knowledgeStore.runConversationAction(knowledgeStore.activeConversationId, {
+        message_id: message.id,
+        action_key: action.key,
+      });
+
+      const nextMessages = messages.value.map((item) => (
+        item.id === response.updated_message?.id
+          ? buildAssistantMessage(response.updated_message, item.scope)
+          : item
+      ));
+
+      nextMessages.push({
+        ...response.user_message,
+        sources: response.user_message?.sources || [],
+        actions: response.user_message?.actions || [],
+      });
+      nextMessages.push(buildAssistantMessage(response.assistant_message, response.scope));
+
+      knowledgeStore.syncConversationRecord(response.conversation, withoutStarterMessage(nextMessages));
+      applyConversationMessages(nextMessages);
+    } catch (err) {
+      const messageText = err.response?.data?.error || 'Aksi percakapan gagal dijalankan.';
+      error.value = messageText;
+      messages.value = [
+        ...withoutStarterMessage(messages.value),
+        {
+          id: `draft-error-${Date.now()}`,
+          role: 'assistant',
+          content: messageText,
+          sources: [],
+          actions: [],
           scopeLabel: 'Error',
         },
       ];
@@ -553,6 +609,7 @@ export const useKnowledgeHubWorkspace = () => {
     createFolder,
     uploadDocument,
     submitQuestion,
+    runMessageAction,
     ensureLoaded,
   };
 };

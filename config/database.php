@@ -114,6 +114,25 @@ return [
             // 'trust_server_certificate' => env('DB_TRUST_SERVER_CERTIFICATE', 'false'),
         ],
 
+        's21plus' => [
+            'driver' => 'sqlsrv',
+            'host' => env('S21PLUS_DB_HOST'),
+            'port' => env('S21PLUS_DB_PORT', '1433'),
+            'instance' => env('S21PLUS_DB_INSTANCE', ''),
+            'database' => env('S21PLUS_DB_DATABASE'),
+            'username' => env('S21PLUS_DB_USERNAME'),
+            'password' => env('S21PLUS_DB_PASSWORD'),
+            'charset' => env('S21PLUS_DB_CHARSET', 'utf8'),
+            'prefix' => '',
+            'prefix_indexes' => true,
+            'encrypt' => env('S21PLUS_DB_ENCRYPT', 'false'),
+            'trust_server_certificate' => env('S21PLUS_DB_TRUST_SERVER_CERTIFICATE', 'true'),
+            'helper_php' => env('S21PLUS_HELPER_PHP', '/opt/homebrew/bin/php'),
+            'helper_script' => env('S21PLUS_HELPER_SCRIPT', base_path('bin/s21plus_odbc_bridge.php')),
+            'odbc_driver_name' => env('S21PLUS_ODBC_DRIVER_NAME', 'ODBC Driver 18 for SQL Server'),
+            'odbc_driver_library' => env('S21PLUS_ODBC_DRIVER_LIBRARY', base_path('third_party/msodbcsql18/msodbcsql-18.6.2.1/lib/libmsodbcsql.18.dylib')),
+        ],
+
     ],
 
     /*

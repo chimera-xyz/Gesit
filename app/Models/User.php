@@ -25,6 +25,7 @@ class User extends Authenticatable
         'email',
         'password',
         'employee_id',
+        's21plus_user_id',
         'department',
         'phone_number',
         'signature_path',

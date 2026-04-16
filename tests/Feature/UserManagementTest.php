@@ -28,6 +28,7 @@ class UserManagementTest extends TestCase
             'email' => 'rania@example.com',
             'department' => 'Finance',
             'employee_id' => 'EMP-900',
+            's21plus_user_id' => 'rania.s21',
             'phone_number' => '08123456789',
             'roles' => ['Accounting', 'IT Staff'],
             'is_active' => true,
@@ -38,7 +39,8 @@ class UserManagementTest extends TestCase
         $response
             ->assertCreated()
             ->assertJsonPath('user.name', 'Rania Finance IT')
-            ->assertJsonPath('user.department', 'Finance');
+            ->assertJsonPath('user.department', 'Finance')
+            ->assertJsonPath('user.s21plus_user_id', 'rania.s21');
 
         $this->assertEqualsCanonicalizing(
             ['Accounting', 'IT Staff'],
@@ -50,6 +52,7 @@ class UserManagementTest extends TestCase
         $this->assertTrue($user->hasRole('Accounting'));
         $this->assertTrue($user->hasRole('IT Staff'));
         $this->assertTrue(Hash::check('securepass123', $user->password));
+        $this->assertSame('rania.s21', $user->s21plus_user_id);
     }
 
     public function test_admin_can_update_user_and_toggle_status(): void
@@ -65,17 +68,20 @@ class UserManagementTest extends TestCase
         $this->actingAs($admin)->putJson("/api/users/{$user->id}", [
             'name' => 'Updated User',
             'department' => 'IT Operations',
+            's21plus_user_id' => 'updated.s21',
             'roles' => ['IT Staff', 'Employee'],
             'is_active' => false,
         ])
             ->assertOk()
             ->assertJsonPath('user.name', 'Updated User')
-            ->assertJsonPath('user.is_active', false);
+            ->assertJsonPath('user.is_active', false)
+            ->assertJsonPath('user.s21plus_user_id', 'updated.s21');
 
         $user->refresh();
 
         $this->assertSame('Updated User', $user->name);
         $this->assertSame('IT Operations', $user->department);
+        $this->assertSame('updated.s21', $user->s21plus_user_id);
         $this->assertFalse($user->is_active);
         $this->assertTrue($user->hasRole('IT Staff'));
         $this->assertTrue($user->hasRole('Employee'));

@@ -16,12 +16,14 @@ class KnowledgeConversationMessage extends Model
         'scope',
         'provider',
         'sources',
+        'actions',
     ];
 
     protected function casts(): array
     {
         return [
             'sources' => 'array',
+            'actions' => 'array',
         ];
     }
 

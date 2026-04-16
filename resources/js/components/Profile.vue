@@ -23,6 +23,10 @@
           <p class="text-sm font-medium text-gray-500">Employee ID</p>
           <p class="mt-1 text-lg font-semibold text-gray-900">{{ authStore.user?.employee_id || '-' }}</p>
         </div>
+        <div>
+          <p class="text-sm font-medium text-gray-500">UserID S21Plus</p>
+          <p class="mt-1 text-lg font-semibold text-gray-900">{{ authStore.user?.s21plus_user_id || '-' }}</p>
+        </div>
       </div>
     </div>
 

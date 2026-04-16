@@ -33,7 +33,8 @@ class AdminUserController extends Controller
                     $userQuery->where('name', 'like', "%{$search}%")
                         ->orWhere('email', 'like', "%{$search}%")
                         ->orWhere('department', 'like', "%{$search}%")
-                        ->orWhere('employee_id', 'like', "%{$search}%");
+                        ->orWhere('employee_id', 'like', "%{$search}%")
+                        ->orWhere('s21plus_user_id', 'like', "%{$search}%");
                 });
             }
 
@@ -80,6 +81,7 @@ class AdminUserController extends Controller
                     'password' => Hash::make($validated['password']),
                     'department' => $this->nullableTrim($validated['department'] ?? null),
                     'employee_id' => $this->nullableTrim($validated['employee_id'] ?? null),
+                    's21plus_user_id' => $this->nullableTrim($validated['s21plus_user_id'] ?? null),
                     'phone_number' => $this->nullableTrim($validated['phone_number'] ?? null),
                     'is_active' => $validated['is_active'] ?? true,
                 ]);
@@ -122,6 +124,7 @@ class AdminUserController extends Controller
                     'email' => array_key_exists('email', $validated) ? trim($validated['email']) : $user->email,
                     'department' => array_key_exists('department', $validated) ? $this->nullableTrim($validated['department']) : $user->department,
                     'employee_id' => array_key_exists('employee_id', $validated) ? $this->nullableTrim($validated['employee_id']) : $user->employee_id,
+                    's21plus_user_id' => array_key_exists('s21plus_user_id', $validated) ? $this->nullableTrim($validated['s21plus_user_id']) : $user->s21plus_user_id,
                     'phone_number' => array_key_exists('phone_number', $validated) ? $this->nullableTrim($validated['phone_number']) : $user->phone_number,
                     'is_active' => $isActive,
                 ]);
@@ -190,6 +193,7 @@ class AdminUserController extends Controller
             'email' => [$isUpdate ? 'sometimes' : 'required', 'string', 'email', 'max:255', Rule::unique('users', 'email')->ignore($userId)],
             'department' => ['sometimes', 'nullable', 'string', 'max:255'],
             'employee_id' => ['sometimes', 'nullable', 'string', 'max:50', Rule::unique('users', 'employee_id')->ignore($userId)],
+            's21plus_user_id' => ['sometimes', 'nullable', 'string', 'max:120', Rule::unique('users', 's21plus_user_id')->ignore($userId)],
             'phone_number' => ['sometimes', 'nullable', 'string', 'max:20'],
             'roles' => [$isUpdate ? 'sometimes' : 'required', 'array', 'min:1'],
             'roles.*' => ['sometimes', 'string', Rule::exists('roles', 'name')],
@@ -209,6 +213,7 @@ class AdminUserController extends Controller
             'email' => $user->email,
             'department' => $user->department,
             'employee_id' => $user->employee_id,
+            's21plus_user_id' => $user->s21plus_user_id,
             'phone_number' => $user->phone_number,
             'is_active' => (bool) $user->is_active,
             'roles' => $user->roles->pluck('name')->values()->all(),

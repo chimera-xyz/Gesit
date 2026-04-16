@@ -16,7 +16,7 @@
       <div class="grid gap-4 lg:grid-cols-[1.6fr_1fr_1fr_auto]">
         <div>
           <label class="mb-2 block text-sm font-medium text-gray-700">Cari User</label>
-          <input v-model="filters.search" type="text" class="input-field" placeholder="Cari nama, email, divisi, atau employee ID">
+          <input v-model="filters.search" type="text" class="input-field" placeholder="Cari nama, email, divisi, employee ID, atau UserID S21Plus">
         </div>
 
         <div>
@@ -93,6 +93,7 @@
                     <p class="font-semibold text-gray-900">{{ user.name }}</p>
                     <p class="mt-1 text-sm text-gray-600">{{ user.email }}</p>
                     <p v-if="user.employee_id" class="mt-1 text-xs text-gray-500">Employee ID: {{ user.employee_id }}</p>
+                    <p v-if="user.s21plus_user_id" class="mt-1 text-xs text-gray-500">S21Plus ID: {{ user.s21plus_user_id }}</p>
                     <span v-if="user.is_current_user" class="mt-2 inline-flex rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
                       Akun Anda
                     </span>
@@ -224,6 +225,7 @@ const filteredUsers = computed(() => {
       user.email,
       user.department,
       user.employee_id,
+      user.s21plus_user_id,
     ].filter(Boolean).some((value) => String(value).toLowerCase().includes(search));
 
     const matchesRole = !filters.value.role || user.roles.includes(filters.value.role);
@@ -312,6 +314,7 @@ const sanitizePayload = (payload) => {
     email: payload.email,
     department: payload.department,
     employee_id: payload.employee_id,
+    s21plus_user_id: payload.s21plus_user_id,
     phone_number: payload.phone_number,
     roles: payload.roles,
     is_active: payload.is_active,

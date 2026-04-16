@@ -28,7 +28,7 @@
               Apa yang ingin Anda ketahui?
             </h2>
             <p class="mt-3 text-sm text-[#6b7280]">
-              Tanya SOP, panduan operasional, atau knowledge internal perusahaan.
+              Tanya SOP, panduan operasional, atau minta bantuan proses internal yang tersedia.
             </p>
           </div>
         </div>
@@ -90,6 +90,22 @@
             >
               <div class="assistant-rich-text" v-html="renderAssistantText(sourceClosing(message))"></div>
             </div>
+
+            <div v-if="message.actions?.length" class="mt-4 flex flex-wrap gap-3">
+              <button
+                v-for="action in message.actions"
+                :key="`${message.id}-${action.key}`"
+                type="button"
+                class="inline-flex h-11 items-center justify-center rounded-full px-5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60"
+                :class="action.variant === 'secondary'
+                  ? 'border border-[#d8bc84] bg-white text-[#8f6115] hover:bg-[#fffaf1]'
+                  : 'bg-[#9b6b17] text-white hover:bg-[#83580f]'"
+                :disabled="chatLoading"
+                @click="handleAction(message, action)"
+              >
+                {{ action.label }}
+              </button>
+            </div>
           </article>
 
           <div v-if="chatLoading" class="max-w-3xl rounded-[24px] bg-white px-5 py-4 text-sm text-[#6b7280]">
@@ -109,7 +125,7 @@
               v-model="chatInput"
               rows="1"
               class="max-h-52 min-h-[1.75rem] w-full resize-none border-0 bg-transparent p-0 text-sm leading-7 text-[#374151] outline-none placeholder:text-[#9ca3af] focus:ring-0"
-              placeholder="Tanyakan knowledge perusahaan..."
+              placeholder="Tanyakan knowledge atau minta bantuan yang tersedia..."
               @input="resizeComposer"
               @keydown.enter.exact.prevent="handleSubmit()"
             ></textarea>
@@ -151,6 +167,7 @@ const {
   selectedPreviewPage,
   openSourceFromChat,
   submitQuestion,
+  runMessageAction,
 } = injectKnowledgeHubWorkspace();
 
 const messageViewport = ref(null);
@@ -158,6 +175,10 @@ const composerRef = ref(null);
 
 const handleSubmit = (question = '') => {
   submitQuestion(question);
+};
+
+const handleAction = (message, action) => {
+  runMessageAction(message, action);
 };
 
 const resizeComposer = async () => {

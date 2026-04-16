@@ -194,6 +194,16 @@ export const useKnowledgeHubStore = defineStore('knowledgeHub', {
             }
         },
 
+        async runConversationAction(conversationId, payload) {
+            try {
+                const response = await axios.post(`/api/knowledge-hub/conversations/${conversationId}/actions`, payload);
+                return response.data;
+            } catch (error) {
+                console.error('Error running knowledge conversation action:', error);
+                throw error;
+            }
+        },
+
         async fetchConversations() {
             try {
                 const response = await axios.get('/api/knowledge-hub/conversations');

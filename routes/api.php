@@ -85,6 +85,8 @@ Route::middleware('web')->group(function () {
             ->middleware('permission:view knowledge hub');
         Route::post('/knowledge-hub/ask', [KnowledgeHubController::class, 'ask'])
             ->middleware('permission:view knowledge hub');
+        Route::post('/knowledge-hub/conversations/{id}/actions', [KnowledgeHubController::class, 'performConversationAction'])
+            ->middleware('permission:view knowledge hub');
         Route::post('/knowledge-hub/entries/{id}/bookmark', [KnowledgeHubController::class, 'toggleBookmark'])
             ->middleware('permission:view knowledge hub');
         Route::post('/knowledge-hub/spaces/{spaceId}/folders', [KnowledgeHubController::class, 'storeFolder'])

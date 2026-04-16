@@ -47,6 +47,13 @@
         </div>
 
         <div>
+          <label class="mb-2 block text-sm font-medium text-gray-700">UserID S21Plus</label>
+          <input v-model="form.s21plus_user_id" type="text" class="input-field" placeholder="Contoh: lina">
+          <p class="mt-2 text-xs text-gray-500">Dipakai untuk fitur self-service unblock akun S21Plus.</p>
+          <p v-if="errors.s21plus_user_id" class="mt-2 text-sm text-red-700">{{ errors.s21plus_user_id }}</p>
+        </div>
+
+        <div>
           <label class="mb-2 block text-sm font-medium text-gray-700">Nomor Telepon</label>
           <input v-model="form.phone_number" type="text" class="input-field" placeholder="Opsional">
           <p v-if="errors.phone_number" class="mt-2 text-sm text-red-700">{{ errors.phone_number }}</p>
@@ -165,6 +172,7 @@ const emptyForm = () => ({
   email: '',
   department: '',
   employee_id: '',
+  s21plus_user_id: '',
   phone_number: '',
   roles: [],
   is_active: true,
@@ -181,6 +189,7 @@ const syncForm = () => {
         email: props.user.email || '',
         department: props.user.department || '',
         employee_id: props.user.employee_id || '',
+        s21plus_user_id: props.user.s21plus_user_id || '',
         phone_number: props.user.phone_number || '',
         roles: Array.isArray(props.user.roles) ? [...props.user.roles] : [],
         is_active: props.user.is_active ?? true,
@@ -210,6 +219,7 @@ const submit = () => {
     email: form.email,
     department: form.department,
     employee_id: form.employee_id,
+    s21plus_user_id: form.s21plus_user_id,
     phone_number: form.phone_number,
     roles: form.roles,
     is_active: form.is_active,
