@@ -111,6 +111,8 @@ class KnowledgeHubController extends Controller
                     ->map(fn (KnowledgeConversationMessage $message) => [
                         'role' => $message->role,
                         'content' => $message->content,
+                        'scope' => $message->scope,
+                        'sources' => $message->sources ?? [],
                     ])
                     ->values()
                     ->all();
@@ -606,13 +608,39 @@ class KnowledgeHubController extends Controller
 
     private function transformConversationMessage(KnowledgeConversationMessage $message): array
     {
+        $sources = $message->sources ?? [];
+        [$sourceIntro, $sourceClosing] = $this->splitSourceMessageContent($message->content, $sources);
+
         return [
             'id' => $message->id,
             'role' => $message->role,
             'content' => $message->content,
-            'sources' => $message->sources ?? [],
+            'source_intro' => $sourceIntro,
+            'source_closing' => $sourceClosing,
+            'sources' => $sources,
             'scopeLabel' => $message->role === 'assistant' ? $this->scopeLabel($message->scope) : null,
             'created_at' => optional($message->created_at)->toISOString(),
+        ];
+    }
+
+    private function splitSourceMessageContent(string $content, array $sources): array
+    {
+        if ($sources === []) {
+            return [null, null];
+        }
+
+        $parts = preg_split('/\[\[DOCUMENT_CARDS\]\]/', $content, 2);
+
+        if (is_array($parts) && count($parts) === 2) {
+            return [
+                trim($parts[0]) ?: null,
+                trim($parts[1]) ?: null,
+            ];
+        }
+
+        return [
+            trim($content) ?: null,
+            null,
         ];
     }
 
@@ -636,7 +664,6 @@ class KnowledgeHubController extends Controller
         return match ($scope) {
             'internal' => 'Internal',
             'securities_domain' => 'Domain Sekuritas',
-            'out_of_scope' => 'Di luar scope',
             'error' => 'Error',
             default => null,
         };

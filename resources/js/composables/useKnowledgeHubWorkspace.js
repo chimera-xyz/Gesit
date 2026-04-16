@@ -4,8 +4,7 @@ import { useKnowledgeHubStore } from '../stores/knowledgeHub';
 const defaultAssistantMessage = () => ({
   id: 1,
   role: 'assistant',
-  content: 'Tanyakan SOP internal, workflow operasional, panduan aplikasi, atau domain sekuritas. Jika konteks tidak cukup, saya akan menjawab data belum tersedia.',
-  scopeLabel: 'Guarded Mode',
+  content: 'Halo, saya AI Knowledge Assistant GESIT. Saya bisa bantu mencari SOP, panduan operasional, dokumen internal, workflow, dan konteks domain sekuritas di Knowledge Hub.',
   sources: [],
 });
 
@@ -28,6 +27,7 @@ export const useKnowledgeHubWorkspace = () => {
   const chatLoading = ref(false);
   const historyLoading = ref(false);
   const searchLoading = ref(false);
+  const chatLoadingMessage = ref('');
   const creatingFolder = ref(false);
   const uploadingDocument = ref(false);
   const error = ref('');
@@ -290,7 +290,12 @@ export const useKnowledgeHubWorkspace = () => {
     return entry;
   };
 
-  const openSourceFromChat = (entryId) => focusEntry(entryId, { fromReference: true });
+  const openSourceFromChat = (source) => {
+    const sourcePayload = typeof source === 'object' && source !== null ? source : { id: source };
+    const previewPage = sourcePayload.suggested_page || null;
+
+    return focusEntry(sourcePayload.id, { previewPage, fromReference: true });
+  };
 
   const toggleBookmark = async (entry) => {
     clearError();
@@ -361,8 +366,29 @@ export const useKnowledgeHubWorkspace = () => {
       return 'Domain Sekuritas';
     }
 
-    return 'Di luar scope';
+    if (scope === 'error') {
+      return 'Error';
+    }
+
+    return null;
   };
+
+  const looksLikeDocumentSearch = (question) => {
+    const normalized = String(question || '').toLowerCase();
+    const markers = [
+      'file', 'dokumen', 'document', 'sop', 'panduan', 'checklist', 'ceklist',
+      'housekeeping', 'house keeping', 'lupa', 'cara', 'gimana', 'bagaimana',
+      'prosedur', 'workflow', 'form', 'mkbd', 'reimburse', 'approval',
+    ];
+
+    return markers.some((marker) => normalized.includes(marker));
+  };
+
+  const buildLoadingMessage = (question) => (
+    looksLikeDocumentSearch(question)
+      ? 'Sedang mencari file terkait...'
+      : 'Assistant sedang mengetik...'
+  );
 
   const submitQuestion = async (presetQuestion = '') => {
     const question = (presetQuestion || chatInput.value).trim();
@@ -386,6 +412,7 @@ export const useKnowledgeHubWorkspace = () => {
 
     chatInput.value = '';
     chatLoading.value = true;
+    chatLoadingMessage.value = buildLoadingMessage(question);
 
     try {
       const response = await knowledgeStore.askQuestion(question);
@@ -406,7 +433,10 @@ export const useKnowledgeHubWorkspace = () => {
       applyConversationMessages(nextMessages);
 
       if (response.sources?.length) {
-        focusEntry(response.sources[0].id, { fromReference: true });
+        focusEntry(response.sources[0].id, {
+          previewPage: response.sources[0].suggested_page || null,
+          fromReference: true,
+        });
       }
     } catch (err) {
       const message = err.response?.data?.error || 'Pertanyaan gagal diproses.';
@@ -423,6 +453,7 @@ export const useKnowledgeHubWorkspace = () => {
       ];
     } finally {
       chatLoading.value = false;
+      chatLoadingMessage.value = '';
     }
   };
 
@@ -471,6 +502,7 @@ export const useKnowledgeHubWorkspace = () => {
   return {
     loading,
     chatLoading,
+    chatLoadingMessage,
     historyLoading,
     searchLoading,
     creatingFolder,

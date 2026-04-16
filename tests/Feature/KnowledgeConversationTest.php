@@ -74,6 +74,225 @@ class KnowledgeConversationTest extends TestCase
         $this->assertDatabaseCount('knowledge_conversation_messages', 4);
     }
 
+    public function test_basic_chat_does_not_require_knowledge_evidence(): void
+    {
+        $user = $this->makeUserWithRole('Employee', [
+            'name' => 'Nadia Employee',
+            'email' => 'nadia.employee@example.com',
+        ]);
+
+        $this->seedInternalKnowledgeEntry([
+            'title' => 'Test Gambar',
+            'summary' => 'Dokumen dummy untuk upload gambar.',
+            'body' => 'Konten ini tidak boleh muncul hanya karena user mengetik test.',
+            'type' => 'form',
+        ]);
+
+        $identityResponse = $this->actingAs($user)->postJson('/api/knowledge-hub/ask', [
+            'question' => 'halo? lu siapa?',
+        ]);
+
+        $identityResponse
+            ->assertOk()
+            ->assertJsonPath('scope', 'conversation')
+            ->assertJsonPath('assistant_message.scopeLabel', null)
+            ->assertJsonPath('sources', []);
+
+        $testResponse = $this->actingAs($user)->postJson('/api/knowledge-hub/ask', [
+            'question' => 'test',
+            'conversation_id' => $identityResponse->json('conversation.id'),
+        ]);
+
+        $testResponse
+            ->assertOk()
+            ->assertJsonPath('scope', 'conversation')
+            ->assertJsonPath('sources', [])
+            ->assertJsonMissing([
+                'title' => 'Test Gambar',
+            ]);
+    }
+
+    public function test_knowledge_question_returns_relevant_document_with_suggested_page(): void
+    {
+        $user = $this->makeUserWithRole('Employee', [
+            'name' => 'Hana Employee',
+            'email' => 'hana.employee@example.com',
+        ]);
+
+        $entry = $this->seedInternalKnowledgeEntry([
+            'title' => 'Checklist Housekeeping Setelah MKBD',
+            'summary' => 'Panduan housekeeping operasional setelah proses MKBD selesai.',
+            'body' => "[Halaman 1]\nPembukaan dokumen operasional.\n\n[Halaman 12]\nPastikan housekeeping dilakukan setelah MKBD dari Accounting selesai, lalu ikuti checklist operasional.",
+            'reference_notes' => null,
+            'tags' => ['housekeeping', 'mkbd'],
+        ]);
+
+        $response = $this->actingAs($user)->postJson('/api/knowledge-hub/ask', [
+            'question' => 'gua lupa cara housekeeping nih',
+        ]);
+
+        $response
+            ->assertOk()
+            ->assertJsonPath('scope', 'internal')
+            ->assertJsonPath('sources.0.id', $entry->id)
+            ->assertJsonPath('sources.0.suggested_page', 12)
+            ->assertJsonPath('assistant_message.sources.0.suggested_page', 12);
+    }
+
+    public function test_new_knowledge_topic_does_not_reuse_previous_document_sources(): void
+    {
+        $user = $this->makeUserWithRole('Employee', [
+            'name' => 'Irwan Employee',
+            'email' => 'irwan.employee@example.com',
+        ]);
+
+        $housekeepingEntry = $this->seedInternalKnowledgeEntry([
+            'title' => 'Housekeeping',
+            'summary' => 'Housekeeping dilakukan setelah MKBD dari Accounting.',
+            'body' => 'Housekeeping dilakukan setelah MKBD dari Accounting selesai.',
+            'reference_notes' => 'Halaman 1',
+            'tags' => ['housekeeping', 'mkbd'],
+        ]);
+
+        $firstResponse = $this->actingAs($user)->postJson('/api/knowledge-hub/ask', [
+            'question' => 'saya lupa cara housekeeping boleh dibantu?',
+        ]);
+
+        $firstResponse
+            ->assertOk()
+            ->assertJsonPath('sources.0.id', $housekeepingEntry->id);
+
+        $secondResponse = $this->actingAs($user)->postJson('/api/knowledge-hub/ask', [
+            'question' => 'gimana cara import logbook csv di outlook?',
+            'conversation_id' => $firstResponse->json('conversation.id'),
+        ]);
+
+        $secondResponse
+            ->assertOk()
+            ->assertJsonPath('sources', [])
+            ->assertJsonMissing([
+                'title' => 'Housekeeping',
+            ]);
+    }
+
+    public function test_ambiguous_it_sore_sop_query_filters_unrelated_documents(): void
+    {
+        $user = $this->makeUserWithRole('Employee', [
+            'name' => 'Tama Employee',
+            'email' => 'tama.employee@example.com',
+        ]);
+
+        $itSpace = KnowledgeSpace::query()->create([
+            'name' => 'IT',
+            'kind' => 'division',
+            'description' => 'Knowledge IT',
+            'sort_order' => 1,
+            'is_active' => true,
+        ]);
+        $itSection = KnowledgeSection::query()->create([
+            'knowledge_space_id' => $itSpace->id,
+            'name' => 'SOP',
+            'description' => 'SOP IT',
+            'sort_order' => 1,
+            'is_active' => true,
+        ]);
+
+        $housekeeping = KnowledgeEntry::query()->create([
+            'knowledge_section_id' => $itSection->id,
+            'title' => 'HouseKeeping',
+            'summary' => 'SOP operasional rutin harian sore untuk divisi IT.',
+            'body' => '[Halaman 1] PROSEDUR OPERASI STANDAR Divisi Teknologi Informasi Judul: Operasional Rutin Harian (Sore) No: SOP/IT/20. Housekeeping dilakukan setelah MKBD dari Accounting.',
+            'scope' => 'internal',
+            'type' => 'sop',
+            'source_kind' => 'file',
+            'owner_name' => 'IT Operation',
+            'version_label' => 'Belum diisi',
+            'reference_notes' => 'Halaman 1',
+            'tags' => ['housekeeping', 'sore'],
+            'access_mode' => 'all',
+            'sort_order' => 1,
+            'is_active' => true,
+        ]);
+
+        KnowledgeEntry::query()->create([
+            'knowledge_section_id' => $itSection->id,
+            'title' => 'Onboarding IT 7 Hari Pertama',
+            'summary' => 'Daftar materi wajib untuk anggota baru tim IT.',
+            'body' => 'Materi pengenalan tim, akses awal, dan daftar aplikasi internal untuk anggota baru IT.',
+            'scope' => 'internal',
+            'type' => 'troubleshooting',
+            'source_kind' => 'article',
+            'access_mode' => 'all',
+            'sort_order' => 2,
+            'is_active' => true,
+        ]);
+
+        $salesSpace = KnowledgeSpace::query()->create([
+            'name' => 'Sales',
+            'kind' => 'division',
+            'description' => 'Knowledge Sales',
+            'sort_order' => 2,
+            'is_active' => true,
+        ]);
+        $salesSection = KnowledgeSection::query()->create([
+            'knowledge_space_id' => $salesSpace->id,
+            'name' => 'test',
+            'description' => 'Dummy upload',
+            'sort_order' => 1,
+            'is_active' => true,
+        ]);
+        KnowledgeEntry::query()->create([
+            'knowledge_section_id' => $salesSection->id,
+            'title' => 'Test File',
+            'summary' => 'Dokumen dummy asset profile.',
+            'body' => 'KODE ASSET MON-0003-2026 Generated I N V E N TA R I S I T Asset Profile Document.',
+            'scope' => 'internal',
+            'type' => 'troubleshooting',
+            'source_kind' => 'file',
+            'access_mode' => 'all',
+            'sort_order' => 1,
+            'is_active' => true,
+        ]);
+
+        $financeSpace = KnowledgeSpace::query()->create([
+            'name' => 'Finance',
+            'kind' => 'division',
+            'description' => 'Knowledge Finance',
+            'sort_order' => 3,
+            'is_active' => true,
+        ]);
+        $financeSection = KnowledgeSection::query()->create([
+            'knowledge_space_id' => $financeSpace->id,
+            'name' => 'Reimburse & Approval',
+            'description' => 'Panduan reimburse',
+            'sort_order' => 1,
+            'is_active' => true,
+        ]);
+        KnowledgeEntry::query()->create([
+            'knowledge_section_id' => $financeSection->id,
+            'title' => 'SOP Reimburse Makan Dinas',
+            'summary' => 'Alur pengajuan reimburse makan dinas dari submit form sampai pembayaran.',
+            'body' => 'Staff mengisi formulir reimburse dan approval dilakukan oleh Finance Operation.',
+            'scope' => 'internal',
+            'type' => 'sop',
+            'source_kind' => 'article',
+            'access_mode' => 'all',
+            'sort_order' => 1,
+            'is_active' => true,
+        ]);
+
+        $response = $this->actingAs($user)->postJson('/api/knowledge-hub/ask', [
+            'question' => 'saya lupa cara sop sore gitu apa namanya ya karna sayakan divisi It tuh',
+        ]);
+
+        $response
+            ->assertOk()
+            ->assertJsonPath('sources.0.id', $housekeeping->id)
+            ->assertJsonMissing(['title' => 'Onboarding IT 7 Hari Pertama'])
+            ->assertJsonMissing(['title' => 'Test File'])
+            ->assertJsonMissing(['title' => 'SOP Reimburse Makan Dinas']);
+    }
+
     public function test_user_can_list_search_and_view_only_own_conversations(): void
     {
         Carbon::setTestNow(Carbon::parse('2026-04-15 09:30:00'));
@@ -217,7 +436,7 @@ class KnowledgeConversationTest extends TestCase
             ->assertNotFound();
     }
 
-    private function seedInternalKnowledgeEntry(): KnowledgeEntry
+    private function seedInternalKnowledgeEntry(array $overrides = []): KnowledgeEntry
     {
         $space = KnowledgeSpace::query()->create([
             'name' => 'Finance',
@@ -234,7 +453,7 @@ class KnowledgeConversationTest extends TestCase
             'is_active' => true,
         ]);
 
-        return KnowledgeEntry::query()->create([
+        return KnowledgeEntry::query()->create(array_merge([
             'knowledge_section_id' => $section->id,
             'title' => 'SOP Reimburse Makan Dinas',
             'summary' => 'Panduan reimburse makan dinas untuk seluruh staff.',
@@ -256,7 +475,7 @@ class KnowledgeConversationTest extends TestCase
             'access_mode' => 'all',
             'sort_order' => 1,
             'is_active' => true,
-        ]);
+        ], $overrides));
     }
 
     private function makeUserWithRole(string $role, array $attributes = []): User

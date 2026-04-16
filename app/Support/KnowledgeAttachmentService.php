@@ -59,10 +59,7 @@ class KnowledgeAttachmentService
                 in_array($extension, ['txt', 'md', 'csv', 'log'], true), Str::startsWith($mime, 'text/')
                     => file_get_contents($realPath) ?: null,
                 $extension === 'pdf', $mime === 'application/pdf'
-                    => $this->runShellCommand(sprintf('%s -layout -nopgbrk %%s -', $this->resolveBinary([
-                        '/opt/homebrew/bin/pdftotext',
-                        'pdftotext',
-                    ])), $realPath),
+                    => $this->extractPdfText($realPath),
                 in_array($extension, ['doc', 'docx', 'rtf'], true),
                     in_array($mime, [
                         'application/msword',
@@ -86,6 +83,27 @@ class KnowledgeAttachmentService
         }
 
         return $this->normalizeText($rawText);
+    }
+
+    private function extractPdfText(string $realPath): ?string
+    {
+        $rawText = $this->runShellCommand(sprintf('%s -layout %%s -', $this->resolveBinary([
+            '/opt/homebrew/bin/pdftotext',
+            'pdftotext',
+        ])), $realPath);
+
+        if (! is_string($rawText) || trim($rawText) === '') {
+            return null;
+        }
+
+        $pages = preg_split("/\f/u", $rawText) ?: [];
+
+        return collect($pages)
+            ->map(fn ($page) => trim((string) $page))
+            ->filter()
+            ->values()
+            ->map(fn ($page, $index) => '[Halaman '.($index + 1)."]\n".$page)
+            ->implode("\n\n");
     }
 
     private function runShellCommand(string $pattern, string $path): ?string
