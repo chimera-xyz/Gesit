@@ -1,18 +1,19 @@
 <template>
-  <div class="space-y-6 pb-8">
-    <section class="rounded-[30px] border border-[#e8dcc9] bg-white p-6 shadow-[0_20px_48px_rgba(41,28,9,0.07)] sm:p-8">
-      <div class="flex flex-wrap items-start justify-between gap-4">
-        <div class="max-w-3xl">
-          <p class="text-[11px] font-semibold uppercase tracking-[0.28em] text-[#a57e3a]">Workflow Studio</p>
-          <h1 class="mt-3 text-3xl font-semibold tracking-tight text-[#111827] sm:text-[2.1rem]">
-            Buat Workflow Form
-          </h1>
-          <p class="mt-3 max-w-2xl text-sm leading-7 text-[#6b7280] sm:text-[0.96rem]">
-            Susun langkah approval per SOP
+  <div class="space-y-4 pb-8">
+    <section class="border-b border-[#eadfcf] pb-4">
+      <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <h1 class="text-2xl font-semibold tracking-tight text-[#111827]">Buat Workflow Form</h1>
+          <p class="mt-2 text-sm text-[#6b7280]">
+            Atur alur approval form secara ringkas dan konsisten.
           </p>
         </div>
 
-        <div class="flex flex-wrap gap-3">
+        <div class="flex flex-wrap items-center gap-3">
+          <div class="flex flex-wrap gap-3 text-sm text-[#6b7280]">
+            <span>{{ workflows.length }} workflow</span>
+            <span>{{ activeWorkflowCount }} aktif</span>
+          </div>
           <button type="button" class="btn-secondary" @click="router.push('/settings')">Kembali</button>
           <button type="button" class="btn-primary" @click="startCreateWorkflow">Workflow Baru</button>
         </div>
@@ -29,85 +30,67 @@
       <button type="button" class="btn-primary mt-4" @click="loadPage">Coba Lagi</button>
     </div>
 
-    <div v-else class="grid gap-6 xl:grid-cols-[0.78fr_1.22fr]">
-      <section class="rounded-[28px] border border-[#e8dcc9] bg-white p-5 shadow-[0_16px_36px_rgba(41,28,9,0.06)]">
+    <div v-else class="grid gap-4 xl:grid-cols-[22rem_minmax(0,1fr)]">
+      <section class="rounded-[20px] border border-[#e8dcc9] bg-white p-4 sm:p-5">
         <div class="flex items-center justify-between gap-3">
           <div>
-            <h2 class="text-lg font-semibold text-[#111827]">Daftar Workflow</h2>
-            <p class="mt-1 text-sm text-[#6b7280]">{{ workflows.length }} workflow tersimpan.</p>
+            <h2 class="text-base font-semibold text-[#111827]">Workflow</h2>
+            <p class="mt-1 text-sm text-[#6b7280]">Pilih untuk edit.</p>
           </div>
-          <span class="rounded-full bg-[#fbf5ea] px-3 py-1 text-xs font-semibold text-[#8f6115]">
+          <span class="rounded-full border border-[#eadfcf] bg-white px-3 py-1 text-xs font-medium text-[#6b7280]">
             {{ activeWorkflowCount }} aktif
           </span>
         </div>
 
-        <div v-if="workflows.length === 0" class="mt-6 rounded-[24px] border border-dashed border-[#d8c7aa] px-5 py-10 text-center">
+        <div v-if="workflows.length === 0" class="mt-5 rounded-[18px] border border-dashed border-[#d8c7aa] px-5 py-10 text-center">
           <p class="text-base font-semibold text-[#111827]">Belum ada workflow</p>
-          <p class="mt-2 text-sm text-[#6b7280]">Mulai dari template default lalu sesuaikan alur approval sesuai SOP internal.</p>
+          <p class="mt-2 text-sm text-[#6b7280]">Mulai dari template default lalu sesuaikan approval sesuai SOP.</p>
         </div>
 
-        <div v-else class="mt-5 space-y-3">
+        <div v-else class="mt-5 divide-y divide-[#f0e6d7]">
           <button
             v-for="workflow in workflows"
             :key="workflow.id"
             type="button"
-            class="w-full rounded-[24px] border px-4 py-4 text-left transition"
+            class="w-full px-2 py-4 text-left transition"
             :class="selectedWorkflowId === workflow.id
-              ? 'border-[#c79f4e] bg-[#fff8eb] shadow-sm'
-              : 'border-[#ece2d1] bg-white hover:border-[#d6b679] hover:bg-[#fffdf9]'"
+              ? 'bg-[#fff8eb]'
+              : 'bg-white hover:bg-[#fffdf9]'"
             @click="selectWorkflow(workflow)"
           >
-            <div class="flex items-start justify-between gap-3">
-              <div class="min-w-0">
-                <div class="flex flex-wrap items-center gap-2">
-                  <p class="truncate text-sm font-semibold text-[#111827]">{{ workflow.name }}</p>
-                  <span
-                    class="rounded-full px-2.5 py-1 text-[11px] font-semibold"
-                    :class="workflow.is_active ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'"
-                  >
-                    {{ workflow.is_active ? 'Aktif' : 'Nonaktif' }}
-                  </span>
-                </div>
-                <p class="mt-2 line-clamp-2 text-sm leading-6 text-[#6b7280]">
-                  {{ workflow.description || 'Belum ada deskripsi workflow.' }}
+            <div class="flex items-start gap-3">
+              <span
+                class="mt-1 h-2.5 w-2.5 shrink-0 rounded-full"
+                :class="workflow.is_active ? 'bg-emerald-500' : 'bg-gray-300'"
+              ></span>
+              <div class="min-w-0 flex-1">
+                <p class="truncate text-sm font-semibold text-[#111827]">{{ workflow.name }}</p>
+                <p class="mt-1 truncate text-xs text-[#6b7280]">
+                  {{ workflow.steps_count }} step · {{ workflow.forms_count }} form · {{ workflow.slug }}
                 </p>
               </div>
-              <span class="rounded-full bg-[#fbf5ea] px-3 py-1 text-xs font-semibold text-[#8f6115]">
-                {{ workflow.steps_count }} step
-              </span>
-            </div>
-
-            <div class="mt-4 flex flex-wrap gap-2 text-xs">
-              <span class="rounded-full bg-[#f7f3eb] px-3 py-1 font-medium text-[#6b7280]">
-                {{ workflow.forms_count }} form terhubung
-              </span>
-              <span class="rounded-full bg-[#f7f3eb] px-3 py-1 font-medium text-[#6b7280]">
-                {{ workflow.slug }}
-              </span>
             </div>
           </button>
         </div>
       </section>
 
-      <section class="rounded-[28px] border border-[#e8dcc9] bg-white p-6 shadow-[0_16px_36px_rgba(41,28,9,0.06)]">
-        <div class="flex flex-wrap items-start justify-between gap-4">
+      <section class="rounded-[20px] border border-[#e8dcc9] bg-white p-5 sm:p-6">
+        <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
-            <p class="text-xs font-semibold uppercase tracking-[0.22em] text-[#a57e3a]">
-              {{ form.id ? 'Edit Workflow' : 'Workflow Baru' }}
-            </p>
-            <h2 class="mt-2 text-2xl font-semibold text-[#111827]">
+            <p class="text-sm font-medium text-[#8f6115]">{{ form.id ? 'Edit workflow' : 'Workflow baru' }}</p>
+            <h2 class="mt-1 text-xl font-semibold text-[#111827]">
               {{ form.name || 'Draft Workflow Baru' }}
             </h2>
-            <p class="mt-2 text-sm leading-7 text-[#6b7280]">
-              Actor bisa berupa requester, role, user spesifik, atau system. Setiap step punya policy sendiri untuk signature, notes, dan hak edit submission.
+            <p class="mt-2 max-w-2xl text-sm leading-6 text-[#6b7280]">
+              Definisikan urutan approval, siapa aktornya, dan status yang dipakai submission.
             </p>
           </div>
 
-          <div class="flex flex-wrap gap-3">
+          <div class="flex shrink-0 flex-row flex-wrap items-center justify-start gap-2 lg:justify-end">
             <button
               v-if="form.id"
               type="button"
-              class="btn-danger"
+              class="inline-flex h-10 items-center justify-center rounded-full border border-red-200 bg-white px-4 text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
               :disabled="isDeleting"
               @click="deleteWorkflow"
             >
@@ -115,7 +98,7 @@
             </button>
             <button
               type="button"
-              class="btn-primary"
+              class="inline-flex h-10 items-center justify-center rounded-full border border-[#d8bc84] bg-[#fffaf0] px-4 text-sm font-semibold text-[#8f6115] transition hover:border-[#cfa65a] hover:bg-[#fff6e8] disabled:cursor-not-allowed disabled:opacity-60"
               :disabled="isSaving"
               @click="saveWorkflow"
             >
@@ -124,99 +107,89 @@
           </div>
         </div>
 
-        <div class="mt-6 grid gap-5 md:grid-cols-2">
+        <div class="mt-6 grid gap-4 md:grid-cols-2">
           <div>
-            <label class="mb-2 block text-sm font-medium text-gray-700">Nama Workflow</label>
+            <label class="mb-2 block text-sm font-medium text-[#374151]">Nama Workflow</label>
             <input v-model="form.name" type="text" class="input-field" placeholder="Contoh: SOP Persetujuan Vendor Baru">
           </div>
 
           <div>
-            <label class="mb-2 block text-sm font-medium text-gray-700">Slug</label>
+            <label class="mb-2 block text-sm font-medium text-[#374151]">Slug</label>
             <input v-model="form.slug" type="text" class="input-field" placeholder="Opsional, otomatis bila dikosongkan">
           </div>
 
           <div class="md:col-span-2">
-            <label class="mb-2 block text-sm font-medium text-gray-700">Deskripsi</label>
+            <label class="mb-2 block text-sm font-medium text-[#374151]">Deskripsi</label>
             <textarea
               v-model="form.description"
-              rows="4"
+              rows="3"
               class="input-field"
               placeholder="Jelaskan SOP, tipe approval, atau kebutuhan bisnis yang ditangani workflow ini."
             ></textarea>
           </div>
 
           <div class="md:col-span-2">
-            <label class="flex items-center gap-3 rounded-2xl border border-gray-200 px-4 py-3">
-              <input v-model="form.is_active" type="checkbox">
-              <span class="text-sm text-gray-700">Workflow aktif dan bisa dipasang ke form</span>
+            <label class="inline-flex items-center gap-3 text-sm text-[#4b5563]">
+              <input v-model="form.is_active" type="checkbox" class="h-4 w-4 rounded border-[#d7bc84] text-[#9b6b17]">
+              Workflow aktif dan bisa dipasang ke form
             </label>
           </div>
         </div>
 
-        <div class="mt-8">
-          <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="mt-8 border-t border-[#f0e6d7] pt-6">
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h3 class="text-lg font-semibold text-[#111827]">Step Builder</h3>
-              <p class="mt-1 text-sm text-[#6b7280]">Urutan default mengikuti posisi. Jika `next step` dikosongkan, sistem akan lanjut ke step berikutnya sesuai urutan.</p>
+              <h3 class="text-base font-semibold text-[#111827]">Step Approval</h3>
+              <p class="mt-1 text-sm text-[#6b7280]">Isi konfigurasi utama dulu. Pengaturan teknis bisa dibuka saat dibutuhkan.</p>
             </div>
             <button type="button" class="btn-secondary" @click="addStep">Tambah Step</button>
           </div>
 
-          <div class="mt-5 space-y-4">
+          <div class="mt-4 space-y-3">
             <article
               v-for="(step, index) in form.workflow_config.steps"
               :key="step.local_id"
-              class="rounded-[24px] border border-[#e8dcc9] bg-[#fffdf9] p-5"
+              class="rounded-[18px] border border-[#e8dcc9] bg-white p-4"
             >
-              <div class="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <p class="text-xs font-semibold uppercase tracking-[0.18em] text-[#a57e3a]">Step {{ index + 1 }}</p>
-                  <h4 class="mt-2 text-base font-semibold text-[#111827]">{{ step.name || `Langkah ${index + 1}` }}</h4>
-                  <div class="mt-3 flex flex-wrap gap-2 text-xs">
-                    <span class="rounded-full bg-white px-3 py-1 font-medium text-[#6b7280]">
-                      {{ actorTypeLabel(step.actor_type) }}
-                    </span>
-                    <span class="rounded-full bg-white px-3 py-1 font-medium text-[#6b7280]">
-                      {{ step.action || 'approve' }}
-                    </span>
-                    <span v-if="step.requires_signature" class="rounded-full bg-amber-50 px-3 py-1 font-medium text-amber-700">
-                      Butuh TTD
-                    </span>
-                    <span v-if="step.notes_required" class="rounded-full bg-blue-50 px-3 py-1 font-medium text-blue-700">
-                      Catatan Wajib
-                    </span>
-                    <span v-if="step.allow_form_edit" class="rounded-full bg-emerald-50 px-3 py-1 font-medium text-emerald-700">
-                      Bisa Edit Form
-                    </span>
+              <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div class="flex min-w-0 gap-3">
+                  <span class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[#eadfcf] bg-[#fcfbf8] text-sm font-semibold text-[#8f6115]">
+                    {{ index + 1 }}
+                  </span>
+                  <div class="min-w-0">
+                    <h4 class="truncate text-base font-semibold text-[#111827]">{{ step.name || `Langkah ${index + 1}` }}</h4>
+                    <p class="mt-1 text-xs text-[#6b7280]">
+                      {{ actorTypeLabel(step.actor_type) }} · {{ step.action || 'approve' }} · {{ step.entry_status || 'status belum diisi' }}
+                    </p>
+                    <div v-if="step.requires_signature || step.notes_required || step.allow_form_edit" class="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-[#8f6115]">
+                      <span v-if="step.requires_signature">TTD</span>
+                      <span v-if="step.notes_required">Catatan wajib</span>
+                      <span v-if="step.allow_form_edit">Edit form</span>
+                    </div>
                   </div>
                 </div>
 
-                <div class="flex flex-wrap gap-2">
-                  <button type="button" class="btn-secondary px-3 py-2 text-sm" :disabled="index === 0" @click="moveStep(index, index - 1)">
+                <div class="flex shrink-0 flex-wrap gap-2">
+                  <button type="button" class="rounded-full border border-[#eadfcf] px-3 py-1.5 text-xs font-medium text-[#4b5563] transition hover:border-[#d8bc84] disabled:cursor-not-allowed disabled:opacity-40" :disabled="index === 0" @click="moveStep(index, index - 1)">
                     Naik
                   </button>
-                  <button type="button" class="btn-secondary px-3 py-2 text-sm" :disabled="index === form.workflow_config.steps.length - 1" @click="moveStep(index, index + 1)">
+                  <button type="button" class="rounded-full border border-[#eadfcf] px-3 py-1.5 text-xs font-medium text-[#4b5563] transition hover:border-[#d8bc84] disabled:cursor-not-allowed disabled:opacity-40" :disabled="index === form.workflow_config.steps.length - 1" @click="moveStep(index, index + 1)">
                     Turun
                   </button>
-                  <button type="button" class="btn-danger px-3 py-2 text-sm" @click="removeStep(index)">
+                  <button type="button" class="rounded-full border border-red-200 px-3 py-1.5 text-xs font-medium text-red-700 transition hover:bg-red-50" @click="removeStep(index)">
                     Hapus
                   </button>
                 </div>
               </div>
 
-              <div class="mt-5 grid gap-4 md:grid-cols-2">
+              <div class="mt-4 grid gap-4 md:grid-cols-2">
                 <div>
-                  <label class="mb-2 block text-sm font-medium text-gray-700">Nama Step</label>
+                  <label class="mb-2 block text-sm font-medium text-[#374151]">Nama Step</label>
                   <input v-model="step.name" type="text" class="input-field" placeholder="Contoh: Review Accounting">
                 </div>
 
                 <div>
-                  <label class="mb-2 block text-sm font-medium text-gray-700">Step Key</label>
-                  <input v-model="step.step_key" type="text" class="input-field" placeholder="Contoh: accounting_review">
-                </div>
-
-                <div>
-                  <label class="mb-2 block text-sm font-medium text-gray-700">Actor Type</label>
+                  <label class="mb-2 block text-sm font-medium text-[#374151]">Actor Type</label>
                   <select v-model="step.actor_type" class="select-field" @change="syncActorDefaults(step)">
                     <option value="requester">Requester</option>
                     <option value="role">Role</option>
@@ -226,7 +199,7 @@
                 </div>
 
                 <div>
-                  <label class="mb-2 block text-sm font-medium text-gray-700">Actor Target</label>
+                  <label class="mb-2 block text-sm font-medium text-[#374151]">Actor Target</label>
                   <select v-if="step.actor_type === 'role'" v-model="step.actor_value" class="select-field">
                     <option value="">Pilih role</option>
                     <option v-for="role in roles" :key="role" :value="role">{{ role }}</option>
@@ -249,98 +222,111 @@
                 </div>
 
                 <div>
-                  <label class="mb-2 block text-sm font-medium text-gray-700">Action</label>
+                  <label class="mb-2 block text-sm font-medium text-[#374151]">Action</label>
                   <select v-model="step.action" class="select-field" @change="syncActionDefaults(step)">
                     <option v-for="action in actionOptions" :key="action.value" :value="action.value">
                       {{ action.label }}
                     </option>
                   </select>
                 </div>
-
-                <div>
-                  <label class="mb-2 block text-sm font-medium text-gray-700">Next Step</label>
-                  <select v-model="step.next_step_key" class="select-field">
-                    <option value="">Ikuti urutan default</option>
-                    <option
-                      v-for="option in nextStepOptions(step.local_id)"
-                      :key="option.step_key"
-                      :value="option.step_key"
-                    >
-                      Step {{ option.step_number }} · {{ option.name }}
-                    </option>
-                  </select>
-                </div>
-
-                <div>
-                  <label class="mb-2 block text-sm font-medium text-gray-700">Entry Status</label>
-                  <input v-model="step.entry_status" type="text" class="input-field" placeholder="Contoh: pending_accounting">
-                </div>
-
-                <div>
-                  <label class="mb-2 block text-sm font-medium text-gray-700">Approve Status</label>
-                  <input
-                    v-model="step.approve_status"
-                    type="text"
-                    class="input-field"
-                    placeholder="Kosongkan agar mengikuti status step berikutnya"
-                  >
-                </div>
-
-                <div>
-                  <label class="mb-2 block text-sm font-medium text-gray-700">Reject Status</label>
-                  <input v-model="step.reject_status" type="text" class="input-field" placeholder="Default: rejected">
-                </div>
-
-                <div>
-                  <label class="mb-2 block text-sm font-medium text-gray-700">CTA Label</label>
-                  <input v-model="step.cta_label" type="text" class="input-field" placeholder="Contoh: Setujui untuk Finance">
-                </div>
-
-                <div>
-                  <label class="mb-2 block text-sm font-medium text-gray-700">Label Tombol Reject</label>
-                  <input v-model="step.reject_label" type="text" class="input-field" placeholder="Contoh: Kembalikan">
-                </div>
-
-                <div class="md:col-span-2">
-                  <label class="mb-2 block text-sm font-medium text-gray-700">Placeholder Catatan</label>
-                  <textarea
-                    v-model="step.notes_placeholder"
-                    rows="3"
-                    class="input-field"
-                    placeholder="Petunjuk catatan yang harus diisi approver pada step ini."
-                  ></textarea>
-                </div>
-
-                <div class="md:col-span-2 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                  <label class="flex items-center gap-3 rounded-2xl border border-gray-200 bg-white px-4 py-3">
-                    <input v-model="step.auto_complete" type="checkbox">
-                    <span class="text-sm text-gray-700">Auto complete</span>
-                  </label>
-                  <label class="flex items-center gap-3 rounded-2xl border border-gray-200 bg-white px-4 py-3">
-                    <input v-model="step.requires_signature" type="checkbox" :disabled="step.actor_type === 'system'">
-                    <span class="text-sm text-gray-700">Perlu tanda tangan</span>
-                  </label>
-                  <label class="flex items-center gap-3 rounded-2xl border border-gray-200 bg-white px-4 py-3">
-                    <input v-model="step.notes_required" type="checkbox">
-                    <span class="text-sm text-gray-700">Catatan wajib</span>
-                  </label>
-                  <label class="flex items-center gap-3 rounded-2xl border border-gray-200 bg-white px-4 py-3">
-                    <input v-model="step.allow_form_edit" type="checkbox" :disabled="step.actor_type === 'system'">
-                    <span class="text-sm text-gray-700">Boleh edit form</span>
-                  </label>
-                </div>
               </div>
+
+              <details class="mt-4 rounded-[16px] border border-[#f0e6d7] bg-[#fcfbf8]">
+                <summary class="cursor-pointer px-4 py-3 text-sm font-medium text-[#374151]">
+                  Pengaturan lanjutan
+                </summary>
+
+                <div class="grid gap-4 border-t border-[#f0e6d7] p-4 md:grid-cols-2">
+                  <div>
+                    <label class="mb-2 block text-sm font-medium text-[#374151]">Step Key</label>
+                    <input v-model="step.step_key" type="text" class="input-field" placeholder="Contoh: accounting_review">
+                  </div>
+
+                  <div>
+                    <label class="mb-2 block text-sm font-medium text-[#374151]">Next Step</label>
+                    <select v-model="step.next_step_key" class="select-field">
+                      <option value="">Ikuti urutan default</option>
+                      <option
+                        v-for="option in nextStepOptions(step.local_id)"
+                        :key="option.step_key"
+                        :value="option.step_key"
+                      >
+                        Step {{ option.step_number }} · {{ option.name }}
+                      </option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label class="mb-2 block text-sm font-medium text-[#374151]">Entry Status</label>
+                    <input v-model="step.entry_status" type="text" class="input-field" placeholder="Contoh: pending_accounting">
+                  </div>
+
+                  <div>
+                    <label class="mb-2 block text-sm font-medium text-[#374151]">Approve Status</label>
+                    <input
+                      v-model="step.approve_status"
+                      type="text"
+                      class="input-field"
+                      placeholder="Kosongkan agar mengikuti status step berikutnya"
+                    >
+                  </div>
+
+                  <div>
+                    <label class="mb-2 block text-sm font-medium text-[#374151]">Reject Status</label>
+                    <input v-model="step.reject_status" type="text" class="input-field" placeholder="Default: rejected">
+                  </div>
+
+                  <div>
+                    <label class="mb-2 block text-sm font-medium text-[#374151]">CTA Label</label>
+                    <input v-model="step.cta_label" type="text" class="input-field" placeholder="Contoh: Setujui untuk Finance">
+                  </div>
+
+                  <div>
+                    <label class="mb-2 block text-sm font-medium text-[#374151]">Label Tombol Reject</label>
+                    <input v-model="step.reject_label" type="text" class="input-field" placeholder="Contoh: Kembalikan">
+                  </div>
+
+                  <div class="md:col-span-2">
+                    <label class="mb-2 block text-sm font-medium text-[#374151]">Placeholder Catatan</label>
+                    <textarea
+                      v-model="step.notes_placeholder"
+                      rows="3"
+                      class="input-field"
+                      placeholder="Petunjuk catatan yang harus diisi approver pada step ini."
+                    ></textarea>
+                  </div>
+
+                  <div class="md:col-span-2 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                    <label class="flex items-center gap-3 rounded-xl border border-[#eadfcf] bg-white px-4 py-3">
+                      <input v-model="step.auto_complete" type="checkbox" class="h-4 w-4 rounded border-[#d7bc84] text-[#9b6b17]">
+                      <span class="text-sm text-[#4b5563]">Auto complete</span>
+                    </label>
+                    <label class="flex items-center gap-3 rounded-xl border border-[#eadfcf] bg-white px-4 py-3">
+                      <input v-model="step.requires_signature" type="checkbox" class="h-4 w-4 rounded border-[#d7bc84] text-[#9b6b17]" :disabled="step.actor_type === 'system'">
+                      <span class="text-sm text-[#4b5563]">Perlu tanda tangan</span>
+                    </label>
+                    <label class="flex items-center gap-3 rounded-xl border border-[#eadfcf] bg-white px-4 py-3">
+                      <input v-model="step.notes_required" type="checkbox" class="h-4 w-4 rounded border-[#d7bc84] text-[#9b6b17]">
+                      <span class="text-sm text-[#4b5563]">Catatan wajib</span>
+                    </label>
+                    <label class="flex items-center gap-3 rounded-xl border border-[#eadfcf] bg-white px-4 py-3">
+                      <input v-model="step.allow_form_edit" type="checkbox" class="h-4 w-4 rounded border-[#d7bc84] text-[#9b6b17]" :disabled="step.actor_type === 'system'">
+                      <span class="text-sm text-[#4b5563]">Boleh edit form</span>
+                    </label>
+                  </div>
+                </div>
+              </details>
             </article>
           </div>
         </div>
 
-        <div class="mt-8 rounded-[24px] border border-[#e8dcc9] bg-[#fffdf9] p-5">
-          <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="mt-8 border-t border-[#f0e6d7] pt-6">
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h3 class="text-lg font-semibold text-[#111827]">Preview Status Workflow</h3>
+              <h3 class="text-base font-semibold text-[#111827]">Preview Status Workflow</h3>
               <p class="mt-1 text-sm text-[#6b7280]">Status di bawah akan dipakai untuk pelacakan submission dan pencarian.</p>
             </div>
-            <span class="rounded-full bg-white px-3 py-1 text-xs font-semibold text-[#8f6115]">
+            <span class="rounded-full border border-[#eadfcf] bg-white px-3 py-1 text-xs font-medium text-[#6b7280]">
               {{ statusPreview.length }} status
             </span>
           </div>
@@ -349,7 +335,7 @@
             <span
               v-for="status in statusPreview"
               :key="status"
-              class="rounded-full bg-white px-3 py-1 text-xs font-medium text-[#6b7280]"
+              class="rounded-full border border-[#eadfcf] bg-white px-3 py-1 text-xs font-medium text-[#6b7280]"
             >
               {{ status }}
             </span>
