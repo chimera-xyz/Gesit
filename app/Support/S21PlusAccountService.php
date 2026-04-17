@@ -328,7 +328,7 @@ class S21PlusAccountService
             ]);
         }
 
-        S21PlusUnblockAuditLog::query()->create([
+        $auditLog = S21PlusUnblockAuditLog::query()->create([
             'gesit_user_id' => $user->id,
             'gesit_user_name' => $user->name,
             's21plus_user_id' => $result['s21plus_user_id'] ?? $this->normalizeUserId($user->s21plus_user_id),
@@ -345,6 +345,7 @@ class S21PlusAccountService
         ]);
 
         return [
+            'audit_log_id' => $auditLog->id,
             'request_type' => $result['request_type'],
             'status' => $result['status'],
             'result_code' => $result['result_code'],

@@ -12,6 +12,7 @@ use App\Models\KnowledgeSpace;
 use App\Support\KnowledgeAttachmentService;
 use App\Support\KnowledgeAssistantService;
 use App\Support\S21PlusAccountService;
+use App\Support\S21PlusHelpdeskEscalationService;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -117,7 +118,9 @@ class KnowledgeHubController extends Controller
                         'role' => $message->role,
                         'content' => $message->content,
                         'scope' => $message->scope,
+                        'provider' => $message->provider,
                         'sources' => $message->sources ?? [],
+                        'actions' => $message->actions ?? [],
                     ])
                     ->values()
                     ->all();
@@ -175,7 +178,12 @@ class KnowledgeHubController extends Controller
         }
     }
 
-    public function performConversationAction(Request $request, int $id, S21PlusAccountService $s21plusAccountService)
+    public function performConversationAction(
+        Request $request,
+        int $id,
+        S21PlusAccountService $s21plusAccountService,
+        S21PlusHelpdeskEscalationService $s21plusHelpdeskEscalationService
+    )
     {
         $validated = $request->validate([
             'message_id' => ['required', 'integer'],
@@ -185,7 +193,13 @@ class KnowledgeHubController extends Controller
         try {
             $user = $request->user();
 
-            [$conversation, $actionMessage, $userMessage, $assistantMessage] = DB::transaction(function () use ($validated, $user, $id, $s21plusAccountService) {
+            [$conversation, $actionMessage, $userMessage, $assistantMessage] = DB::transaction(function () use (
+                $validated,
+                $user,
+                $id,
+                $s21plusAccountService,
+                $s21plusHelpdeskEscalationService
+            ) {
                 $conversation = $this->findConversationForUser($user->id, $id)
                     ->load('messages');
 
@@ -203,22 +217,25 @@ class KnowledgeHubController extends Controller
                     ]);
                 }
 
-                $actionMessage->forceFill([
-                    'actions' => [],
-                ])->save();
-
                 $userMessage = $conversation->messages()->create([
                     'role' => 'user',
                     'content' => (string) ($action['label'] ?? 'Menjalankan aksi percakapan'),
                 ]);
 
                 $payload = $this->buildConversationActionPayload(
-                    (string) $validated['action_key'],
+                    $action,
                     $user,
                     $conversation,
                     $userMessage,
-                    $s21plusAccountService
+                    $s21plusAccountService,
+                    $s21plusHelpdeskEscalationService
                 );
+
+                $actionMessage->forceFill([
+                    'actions' => !empty($payload['retain_source_actions'])
+                        ? ($actionMessage->actions ?? [])
+                        : [],
+                ])->save();
 
                 $assistantMessage = $conversation->messages()->create([
                     'role' => 'assistant',
@@ -768,13 +785,41 @@ class KnowledgeHubController extends Controller
     private function matchesS21PlusSupportIntent(string $question, array $conversationHistory = []): bool
     {
         $normalized = $this->normalizeIntentText($question);
-        $s21Markers = ['s21plus', 's21 plus', 's21'];
+        $s21Markers = ['s21plus', 's21 plus', 's21+', 's21 +', 's21'];
         $blockedMarkers = ['keblok', 'keblokir', 'terblokir', 'ter block', 'terblock', 'unblock', 'buka blokir', 'unlock'];
+        $accountContextMarkers = [
+            'akun', 'account', 'aplikasi', 'app', 'login', 'masuk', 'akses', 'userid', 'user id',
+            'id user', 'id akun', 'password', 'sign in', 'signin',
+        ];
         $loginIssueMarkers = [
             'gabisa login', 'ga bisa login', 'gak bisa login', 'ngga bisa login', 'nggak bisa login',
             'tidak bisa login', 'gagal login', 'login gagal', 'salah password', 'lupa password',
             'gabisa masuk', 'ga bisa masuk', 'gak bisa masuk', 'ngga bisa masuk', 'nggak bisa masuk',
             'tidak bisa masuk', 'gabisa akses', 'ga bisa akses', 'gak bisa akses', 'tidak bisa akses',
+            'gabisa kebuka', 'ga bisa kebuka', 'gak bisa kebuka', 'ngga bisa kebuka', 'nggak bisa kebuka',
+            'tidak bisa kebuka', 'gabisa buka', 'ga bisa buka', 'gak bisa buka', 'ngga bisa buka',
+            'nggak bisa buka', 'tidak bisa buka',
+        ];
+        $ambiguousOpenIssueMarkers = [
+            'gabisa dibuka', 'ga bisa dibuka', 'gak bisa dibuka', 'ngga bisa dibuka', 'nggak bisa dibuka',
+            'tidak bisa dibuka', 'susah dibuka', 'gagal dibuka',
+        ];
+        $statusFollowUpMarkers = [
+            'coba cek lagi', 'cek lagi', 'cek dong', 'cek status', 'cek statusnya', 'cek status nya',
+            'cek sekarang', 'cek skrg', 'status sekarang', 'statusnya sekarang', 'status nya sekarang',
+            'kalo sekarang', 'kalau sekarang', 'gimana sekarang', 'gmn sekarang',
+            'masih keblokir', 'masih keblok', 'masih terblokir', 'masih kebuka ga', 'masih kebuka gak',
+            'masih kebuka nggak', 'masih gabisa', 'masih ga bisa', 'masih gak bisa', 'masih ngga bisa',
+            'masih nggak bisa', 'udah bisa', 'sudah bisa', 'udah kebuka', 'sudah kebuka',
+        ];
+        $proofMarkers = [
+            'bukti', 'buktinya', 'bukti nya', 'mana bukti', 'mana buktinya', 'mana bukti nya',
+            'coba buktiin', 'lihat bukti', 'lihat status',
+        ];
+        $deviceMarkers = [
+            'samsung', 'galaxy', 'handphone', 'hp', 'hape', 'ponsel', 'smartphone', 'android',
+            'layar', 'baterai', 'charger', 'cas', 'charge', 'recovery', 'bootloop', 'service center',
+            'tombol power', 'power button', 'volume up', 'volume down',
         ];
 
         $recentUserHistory = collect($conversationHistory)
@@ -785,13 +830,29 @@ class KnowledgeHubController extends Controller
             ->values()
             ->all();
 
+        $hasRecentS21SupportContext = $this->hasRecentS21SupportContext($conversationHistory);
         $hasS21Context = $this->containsAny($normalized, $s21Markers)
-            || collect($recentUserHistory)->contains(fn (string $message) => $this->containsAny($message, $s21Markers));
+            || collect($recentUserHistory)->contains(fn (string $message) => $this->containsAny($message, $s21Markers))
+            || $hasRecentS21SupportContext;
+        $hasAccountContext = $this->containsAny($normalized, $accountContextMarkers)
+            || collect($recentUserHistory)->contains(fn (string $message) => $this->containsAny($message, $accountContextMarkers))
+            || $hasRecentS21SupportContext;
+        $looksLikePhysicalDeviceIssue = $this->containsAny($normalized, $deviceMarkers) && ! $hasAccountContext;
 
         $hasSupportSignal = $this->containsAny($normalized, $blockedMarkers)
-            || $this->containsAny($normalized, $loginIssueMarkers);
+            || $this->containsAny($normalized, $loginIssueMarkers)
+            || ($hasAccountContext && $this->containsAny($normalized, $ambiguousOpenIssueMarkers))
+            || (
+                $hasS21Context
+                && ! $looksLikePhysicalDeviceIssue
+                && $this->containsAny($normalized, $ambiguousOpenIssueMarkers)
+            )
+            || ($hasRecentS21SupportContext && (
+                $this->containsAny($normalized, $statusFollowUpMarkers)
+                || $this->containsAny($normalized, $proofMarkers)
+            ));
 
-        return $hasS21Context && $hasSupportSignal;
+        return $hasS21Context && ! $looksLikePhysicalDeviceIssue && $hasSupportSignal;
     }
 
     private function buildS21PlusInspectionPayload(array $result, \App\Models\User $user): array
@@ -806,21 +867,35 @@ class KnowledgeHubController extends Controller
         return match ($result['result_code']) {
             'mapping_missing' => [
                 ...$basePayload,
-                'answer' => 'Saya belum menemukan UserID S21Plus pada profil GESIT Anda. Silakan hubungi tim IT agar mapping akun Anda dilengkapi terlebih dahulu.',
+                'answer' => 'Saya belum menemukan UserID S21Plus pada profil GESIT Anda. Saya bisa teruskan kendala ini ke Tim IT dan membuat ticket bantuan otomatis supaya Anda tidak perlu isi form manual.',
+                'actions' => [
+                    $this->makeS21PlusContactItAction($result),
+                ],
             ],
             'account_not_found' => [
                 ...$basePayload,
-                'answer' => 'Saya tidak menemukan akun S21Plus yang terhubung dengan profil GESIT Anda. Silakan hubungi tim IT untuk pengecekan lebih lanjut.',
+                'answer' => 'Saya tidak menemukan akun S21Plus yang terhubung dengan profil GESIT Anda. Kalau Anda mau, saya bisa buatkan ticket ke Tim IT langsung dari percakapan ini.',
+                'actions' => [
+                    $this->makeS21PlusContactItAction($result),
+                ],
             ],
             'account_active' => [
                 ...$basePayload,
-                'answer' => 'Akun S21Plus Anda saat ini terdeteksi aktif dan tidak terblokir. Silakan coba login kembali. Jika masih ada kendala, saya sarankan hubungi tim IT untuk pengecekan lanjutan.',
+                'answer' => sprintf(
+                    'Saya cek langsung ke S21Plus sekarang. Akun Anda aktif dan tidak terblokir. %s Silakan coba login kembali. Jika aksesnya tetap bermasalah, saya bisa teruskan ke Tim IT lewat ticket otomatis.',
+                    $this->buildS21PlusStateEvidence($result['after'] ?? $result['before'] ?? [])
+                ),
+                'actions' => [
+                    $this->makeS21PlusContactItAction($result),
+                ],
             ],
             'blocked_confirmed' => [
                 ...$basePayload,
                 'answer' => sprintf(
-                    'Akun S21Plus Anda atas nama %s terdeteksi dalam status terblokir. Saya dapat membantu membuka blokir akun Anda sekarang. Apakah Anda ingin saya lanjutkan?',
+                    'Saya cek langsung ke S21Plus sekarang. Akun S21Plus Anda atas nama %s terdeteksi dalam status terblokir. %s Saya dapat membantu membuka blokir akun Anda sekarang. Apakah Anda ingin saya lanjutkan?',
                     $user->name
+                    ,
+                    $this->buildS21PlusStateEvidence($result['after'] ?? $result['before'] ?? [])
                 ),
                 'actions' => [
                     [
@@ -828,52 +903,71 @@ class KnowledgeHubController extends Controller
                         'label' => 'Buka blokir sekarang',
                         'variant' => 'primary',
                     ],
-                    [
-                        'key' => self::ACTION_S21PLUS_CONTACT_IT,
-                        'label' => 'Hubungi IT manual',
-                        'variant' => 'secondary',
-                    ],
+                    $this->makeS21PlusContactItAction($result),
                 ],
             ],
             'blocked_unexpected_state' => [
                 ...$basePayload,
-                'answer' => 'Status akun S21Plus Anda tidak memenuhi kriteria self-service unblock. Untuk keamanan, silakan hubungi tim IT agar bisa dicek manual.',
+                'answer' => sprintf(
+                    'Saya cek langsung ke S21Plus sekarang, tetapi status akun Anda tidak memenuhi kriteria self-service unblock. %s Saya bisa teruskan kasus ini ke Tim IT melalui ticket bantuan otomatis.',
+                    $this->buildS21PlusStateEvidence($result['after'] ?? $result['before'] ?? [])
+                ),
+                'actions' => [
+                    $this->makeS21PlusContactItAction($result),
+                ],
             ],
             default => [
                 ...$basePayload,
-                'answer' => 'Maaf, saya belum bisa mengakses status akun S21Plus Anda saat ini karena ada kendala pada sistem. Silakan hubungi tim IT untuk bantuan lebih lanjut.',
+                'answer' => 'Maaf, saya belum bisa mengakses status akun S21Plus Anda saat ini karena ada kendala pada sistem. Kalau Anda setuju, saya bisa buatkan ticket ke Tim IT langsung dari percakapan ini.',
+                'actions' => [
+                    $this->makeS21PlusContactItAction($result),
+                ],
             ],
         };
     }
 
     private function buildConversationActionPayload(
-        string $actionKey,
+        array $action,
         \App\Models\User $user,
         KnowledgeConversation $conversation,
         KnowledgeConversationMessage $userMessage,
-        S21PlusAccountService $s21plusAccountService
+        S21PlusAccountService $s21plusAccountService,
+        S21PlusHelpdeskEscalationService $s21plusHelpdeskEscalationService
     ): array {
+        $actionKey = (string) ($action['key'] ?? '');
+
         return match ($actionKey) {
             self::ACTION_S21PLUS_UNLOCK_CONFIRM => $this->buildS21PlusUnlockPayload(
+                $user,
+                $conversation,
+                $userMessage,
                 $s21plusAccountService->unlockOwnAccount($user, [
                     'conversation_id' => $conversation->id,
                     'message_id' => $userMessage->id,
-                ])
+                ]),
+                $s21plusHelpdeskEscalationService
             ),
-            self::ACTION_S21PLUS_CONTACT_IT => [
-                'scope' => 'conversation',
-                'provider' => 'system',
-                'sources' => [],
-                'actions' => [],
-                'answer' => 'Baik, untuk keamanan proses unblock tidak saya lanjutkan. Silakan hubungi tim IT agar akun S21Plus Anda dapat ditangani secara manual.',
-            ],
+            self::ACTION_S21PLUS_CONTACT_IT => $this->buildS21PlusEscalationPayload(
+                $user,
+                $conversation,
+                $userMessage,
+                (array) ($action['context'] ?? []),
+                $s21plusHelpdeskEscalationService,
+                'manual_request'
+            ),
             default => throw ValidationException::withMessages([
                 'action_key' => 'Aksi tidak dikenali.',
             ]),
         };
     }
 
-    private function buildS21PlusUnlockPayload(array $result): array
+    private function buildS21PlusUnlockPayload(
+        \App\Models\User $user,
+        KnowledgeConversation $conversation,
+        KnowledgeConversationMessage $userMessage,
+        array $result,
+        S21PlusHelpdeskEscalationService $s21plusHelpdeskEscalationService
+    ): array
     {
         $basePayload = [
             'scope' => 'conversation',
@@ -885,29 +979,118 @@ class KnowledgeHubController extends Controller
         return match ($result['result_code']) {
             'unlock_success' => [
                 ...$basePayload,
-                'answer' => 'Akun S21Plus Anda berhasil dibuka blokir. Silakan coba login kembali. Jika masih ada kendala, saya siap bantu lanjutkan pengecekan berikutnya.',
+                'answer' => sprintf(
+                    'Akun S21Plus Anda berhasil dibuka blokir. Verifikasi ulang di S21Plus menunjukkan %s Silakan coba login kembali. Jika masih ada kendala, saya siap bantu lanjutkan pengecekan berikutnya.',
+                    $this->buildS21PlusStateEvidence($result['after'] ?? [])
+                ),
             ],
             'account_active' => [
                 ...$basePayload,
-                'answer' => 'Akun S21Plus Anda sudah terdeteksi aktif, jadi proses unblock tidak perlu dijalankan lagi. Silakan coba login kembali.',
+                'answer' => sprintf(
+                    'Akun S21Plus Anda sudah terdeteksi aktif, jadi proses unblock tidak perlu dijalankan lagi. %s Silakan coba login kembali. Jika aksesnya tetap bermasalah, saya bisa buatkan ticket ke Tim IT.',
+                    $this->buildS21PlusStateEvidence($result['after'] ?? $result['before'] ?? [])
+                ),
+                'actions' => [
+                    $this->makeS21PlusContactItAction($result),
+                ],
             ],
-            'mapping_missing' => [
-                ...$basePayload,
-                'answer' => 'Saya belum menemukan UserID S21Plus pada profil GESIT Anda. Silakan hubungi tim IT agar mapping akun Anda dilengkapi terlebih dahulu.',
-            ],
-            'account_not_found' => [
-                ...$basePayload,
-                'answer' => 'Saya tidak menemukan akun S21Plus yang terhubung dengan profil GESIT Anda. Silakan hubungi tim IT untuk pengecekan lebih lanjut.',
-            ],
-            'blocked_unexpected_state' => [
-                ...$basePayload,
-                'answer' => 'Status akun S21Plus Anda tidak memenuhi kriteria self-service unblock. Untuk keamanan, silakan hubungi tim IT agar bisa dicek manual.',
-            ],
-            default => [
-                ...$basePayload,
-                'answer' => 'Maaf, saya belum berhasil membuka blokir akun Anda karena terjadi kendala pada sistem. Silakan hubungi tim IT untuk bantuan lebih lanjut.',
-            ],
+            'mapping_missing',
+            'account_not_found',
+            'blocked_unexpected_state',
+            'service_unavailable',
+            'unlock_failed',
+            'verification_failed' => $this->buildS21PlusEscalationPayload(
+                $user,
+                $conversation,
+                $userMessage,
+                $result,
+                $s21plusHelpdeskEscalationService,
+                'unlock_failed'
+            ),
+            default => $this->buildS21PlusEscalationPayload(
+                $user,
+                $conversation,
+                $userMessage,
+                $result,
+                $s21plusHelpdeskEscalationService,
+                'unlock_failed'
+            ),
         };
+    }
+
+    private function makeS21PlusContactItAction(array $result): array
+    {
+        return [
+            'key' => self::ACTION_S21PLUS_CONTACT_IT,
+            'label' => 'Buat ticket ke Tim IT',
+            'variant' => 'secondary',
+            'context' => [
+                'audit_log_id' => $result['audit_log_id'] ?? null,
+                'request_type' => $result['request_type'] ?? null,
+                'status' => $result['status'] ?? null,
+                'result_code' => $result['result_code'] ?? null,
+                'message' => $result['message'] ?? null,
+                's21plus_user_id' => $result['s21plus_user_id'] ?? null,
+                'before' => $result['before'] ?? [],
+                'after' => $result['after'] ?? [],
+            ],
+        ];
+    }
+
+    private function buildS21PlusEscalationPayload(
+        \App\Models\User $user,
+        KnowledgeConversation $conversation,
+        KnowledgeConversationMessage $userMessage,
+        array $result,
+        S21PlusHelpdeskEscalationService $s21plusHelpdeskEscalationService,
+        string $escalationReason
+    ): array {
+        $basePayload = [
+            'scope' => 'conversation',
+            'provider' => 'system',
+            'sources' => [],
+            'actions' => [],
+        ];
+
+        try {
+            $escalation = $s21plusHelpdeskEscalationService->escalate($user, $conversation, $result, [
+                'conversation_message_id' => $userMessage->id,
+                'trigger_action_key' => $escalationReason === 'manual_request'
+                    ? self::ACTION_S21PLUS_CONTACT_IT
+                    : self::ACTION_S21PLUS_UNLOCK_CONFIRM,
+                'escalation_reason' => $escalationReason,
+                'exclude_user_message_ids' => [$userMessage->id],
+            ]);
+
+            $ticket = $escalation['ticket'];
+            $issueSummary = trim((string) data_get($escalation, 'draft.issue_summary', 'kendala akses akun S21Plus'));
+            $isReused = (bool) ($escalation['ticket_reused'] ?? false);
+
+            $answer = $isReused
+                ? "Saya menemukan ticket {$ticket->ticket_number} yang masih aktif untuk {$this->lowercaseFirst($issueSummary)}. Saya tambahkan konteks terbaru ke ticket yang sama agar tidak duplikat, dan Tim IT sudah menerima update baru."
+                : "Saya sudah buat ticket {$ticket->ticket_number} untuk {$this->lowercaseFirst($issueSummary)}. Ringkasan percakapan dan hasil cek S21Plus terbaru sudah saya kirim ke antrian Tim IT, jadi Anda tidak perlu isi form manual lagi.";
+
+            $answer .= ' Anda bisa pantau progresnya dari menu Butuh Bantuan IT.';
+
+            return [
+                ...$basePayload,
+                'answer' => $answer,
+            ];
+        } catch (\Throwable $exception) {
+            Log::warning('Automatic S21Plus helpdesk escalation failed', [
+                'gesit_user_id' => $user->id,
+                'conversation_id' => $conversation->id,
+                'result_code' => $result['result_code'] ?? null,
+                'reason' => $escalationReason,
+                'error' => $exception->getMessage(),
+            ]);
+
+            return [
+                ...$basePayload,
+                'answer' => 'Saya belum berhasil membuat ticket bantuan otomatis dari percakapan ini. Silakan coba lagi sekali lagi atau buka menu Butuh Bantuan IT untuk melanjutkan pelaporan.',
+                'retain_source_actions' => true,
+            ];
+        }
     }
 
     private function normalizeIntentText(string $text): string
@@ -916,6 +1099,54 @@ class KnowledgeHubController extends Controller
         $normalized = preg_replace('/[^a-z0-9\+\-]+/u', ' ', $normalized) ?? $normalized;
 
         return trim(preg_replace('/\s+/u', ' ', $normalized) ?? $normalized);
+    }
+
+    private function hasRecentS21SupportContext(array $conversationHistory): bool
+    {
+        return collect($conversationHistory)
+            ->take(-8)
+            ->contains(function (array $message) {
+                $normalizedContent = $this->normalizeIntentText((string) ($message['content'] ?? ''));
+                $provider = (string) ($message['provider'] ?? '');
+                $actions = collect($message['actions'] ?? []);
+
+                $hasS21Action = $actions->contains(
+                    fn (mixed $action) => is_array($action) && str_starts_with((string) ($action['key'] ?? ''), 's21plus_')
+                );
+
+                return $hasS21Action
+                    || ($provider === 'system' && $this->containsAny($normalizedContent, ['akun s21plus', 's21plus', 's21 plus']));
+            });
+    }
+
+    private function buildS21PlusStateEvidence(array $state): string
+    {
+        $segments = [];
+
+        if (array_key_exists('is_enabled', $state) && $state['is_enabled'] !== null) {
+            $segments[] = sprintf('IsEnabled = %d', $state['is_enabled'] ? 1 : 0);
+        }
+
+        if (array_key_exists('login_retry', $state) && $state['login_retry'] !== null) {
+            $segments[] = sprintf('LoginRetry = %d', (int) $state['login_retry']);
+        }
+
+        if ($segments === []) {
+            return 'status detail belum tersedia.';
+        }
+
+        return 'status realtime: '.implode(', ', $segments).'.';
+    }
+
+    private function lowercaseFirst(string $value): string
+    {
+        $trimmed = trim($value);
+
+        if ($trimmed === '') {
+            return $trimmed;
+        }
+
+        return Str::lcfirst($trimmed);
     }
 
     private function containsAny(string $haystack, array $needles): bool

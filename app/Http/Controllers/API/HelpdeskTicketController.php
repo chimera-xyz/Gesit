@@ -7,6 +7,7 @@ use App\Models\HelpdeskTicket;
 use App\Models\HelpdeskTicketUpdate;
 use App\Models\Notification;
 use App\Models\User;
+use App\Support\HelpdeskTicketService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
@@ -164,7 +165,7 @@ class HelpdeskTicketController extends Controller
     /**
      * Create a new helpdesk ticket from portal or call logging.
      */
-    public function store(Request $request)
+    public function store(Request $request, HelpdeskTicketService $helpdeskTicketService)
     {
         try {
             $user = $request->user();
@@ -206,80 +207,18 @@ class HelpdeskTicketController extends Controller
                 $attachmentName = $request->file('attachment')->getClientOriginalName();
             }
 
-            $ticket = DB::transaction(function () use ($validated, $request, $user, $requester, $channel, $priority, $status, $assignedTo, $attachmentPath, $attachmentName) {
-                $ticket = HelpdeskTicket::query()->create([
-                    'requester_id' => $requester->id,
-                    'created_by' => $user->id,
-                    'assigned_to' => $assignedTo,
-                    'subject' => $this->resolveSubject($validated['subject'] ?? null, $validated['description']),
-                    'description' => trim((string) $validated['description']),
-                    'category' => $validated['category'],
-                    'channel' => $channel,
-                    'priority' => $priority,
-                    'status' => $status,
-                    'attachment_path' => $attachmentPath,
-                    'attachment_name' => $attachmentName,
-                    'assigned_at' => $assignedTo ? now() : null,
-                    'resolved_at' => $status === 'resolved' ? now() : null,
-                    'closed_at' => $status === 'closed' ? now() : null,
-                    'last_activity_at' => now(),
-                    'context' => $this->buildTicketContext($request, $requester, $validated),
-                ]);
-
-                $ticket->ticket_number = $this->generateTicketNumber($ticket);
-                $ticket->save();
-
-                $this->createTimelineUpdate(
-                    $ticket,
-                    $user,
-                    'created',
-                    $channel === 'phone'
-                        ? 'Ticket bantuan dibuat dari log panggilan.'
-                        : 'Ticket bantuan dibuat dari portal helpdesk.',
-                    false,
-                    [
-                        'channel' => $channel,
-                        'priority' => $priority,
-                    ],
-                );
-
-                if ($assignedTo) {
-                    $assignedUser = User::query()->find($assignedTo);
-
-                    $this->createTimelineUpdate(
-                        $ticket,
-                        $user,
-                        'assigned',
-                        'Ticket di-assign ke ' . ($assignedUser?->name ?? 'petugas helpdesk') . '.',
-                        false,
-                        [
-                            'assigned_to' => $assignedTo,
-                        ],
-                    );
-                }
-
-                if ($status !== 'open') {
-                    $this->createTimelineUpdate(
-                        $ticket,
-                        $user,
-                        'status_changed',
-                        "Status ticket diubah menjadi {$this->statusLabel($status)}.",
-                        false,
-                        [
-                            'status' => $status,
-                        ],
-                    );
-                }
-
-                return $ticket->fresh([
-                    'requester.roles',
-                    'creator',
-                    'assignee',
-                    'updates.user.roles',
-                ]);
-            });
-
-            $this->notifyTicketCreated($ticket, $user, $requester, $assignedTo, $channel);
+            $ticket = $helpdeskTicketService->createTicket($user, $requester, [
+                'category' => $validated['category'],
+                'subject' => $validated['subject'] ?? null,
+                'description' => trim((string) $validated['description']),
+                'channel' => $channel,
+                'priority' => $priority,
+                'status' => $status,
+                'assigned_to' => $assignedTo,
+                'attachment_path' => $attachmentPath,
+                'attachment_name' => $attachmentName,
+                'context' => $this->buildTicketContext($request, $requester, $validated),
+            ]);
 
             return response()->json([
                 'success' => true,
