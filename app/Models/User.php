@@ -13,7 +13,7 @@ use Spatie\Permission\Traits\HasRoles;
 class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
-    use HasFactory, Notifiable, HasRoles, SoftDeletes;
+    use HasFactory, HasRoles, Notifiable, SoftDeletes;
 
     /**
      * The attributes that are mass assignable.
@@ -151,5 +151,40 @@ class User extends Authenticatable
     public function knowledgeConversations()
     {
         return $this->hasMany(KnowledgeConversation::class);
+    }
+
+    public function chatConversationParticipants()
+    {
+        return $this->hasMany(ChatConversationParticipant::class);
+    }
+
+    public function chatConversationStates()
+    {
+        return $this->hasMany(ChatConversationUserState::class);
+    }
+
+    public function chatMessages()
+    {
+        return $this->hasMany(ChatMessage::class, 'sender_id');
+    }
+
+    public function chatCallSessions()
+    {
+        return $this->hasMany(ChatCallSession::class, 'initiated_by');
+    }
+
+    public function chatCallParticipations()
+    {
+        return $this->hasMany(ChatCallParticipant::class);
+    }
+
+    public function chatUserEvents()
+    {
+        return $this->hasMany(ChatUserEvent::class);
+    }
+
+    public function mobileAuthTokens()
+    {
+        return $this->hasMany(MobileAuthToken::class);
     }
 }

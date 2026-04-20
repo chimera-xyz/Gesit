@@ -72,8 +72,8 @@ class HelpdeskTicketTest extends TestCase
             'email' => 'siska.it@example.com',
         ]);
         $employee = $this->makeUserWithRole('Employee', [
-            'name' => 'Dimas User',
-            'email' => 'dimas@example.com',
+            'name' => 'Raihan Carjasti',
+            'email' => 'Raihan@example.com',
         ]);
 
         $response = $this->actingAs($itStaff)->postJson('/api/helpdesk/tickets', [

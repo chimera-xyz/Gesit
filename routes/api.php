@@ -1,23 +1,24 @@
 <?php
 
-use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\API\AdminKnowledgeController;
+use App\Http\Controllers\API\AdminRoleController;
+use App\Http\Controllers\API\AdminUserController;
 use App\Http\Controllers\API\AuthController;
+use App\Http\Controllers\API\ChatController;
 use App\Http\Controllers\API\FormController;
 use App\Http\Controllers\API\FormSubmissionController;
-use App\Http\Controllers\API\Submissions\IndexController;
-use App\Http\Controllers\API\Submissions\CreateController;
-use App\Http\Controllers\API\Submissions\ViewController;
-use App\Http\Controllers\API\WorkflowController;
-use App\Http\Controllers\API\PDFController;
-use App\Http\Controllers\API\SignatureController;
-use App\Http\Controllers\API\UserController;
-use App\Http\Controllers\API\AdminUserController;
-use App\Http\Controllers\API\AdminRoleController;
-use App\Http\Controllers\API\NotificationController;
 use App\Http\Controllers\API\HelpdeskTicketController;
 use App\Http\Controllers\API\ItActivityController;
 use App\Http\Controllers\API\KnowledgeHubController;
-use App\Http\Controllers\API\AdminKnowledgeController;
+use App\Http\Controllers\API\NotificationController;
+use App\Http\Controllers\API\PDFController;
+use App\Http\Controllers\API\SignatureController;
+use App\Http\Controllers\API\Submissions\CreateController;
+use App\Http\Controllers\API\Submissions\IndexController;
+use App\Http\Controllers\API\Submissions\ViewController;
+use App\Http\Controllers\API\UserController;
+use App\Http\Controllers\API\WorkflowController;
+use Illuminate\Support\Facades\Route;
 
 Route::middleware('web')->group(function () {
     Route::middleware('guest')->group(function () {
@@ -25,10 +26,13 @@ Route::middleware('web')->group(function () {
         Route::post('/auth/register', [AuthController::class, 'register']);
     });
 
+    Route::post('/auth/biometric-login', [AuthController::class, 'biometricLogin']);
     Route::post('/auth/logout', [AuthController::class, 'logout'])
         ->middleware('auth');
 
     Route::middleware(['auth', 'active_user'])->group(function () {
+        Route::post('/auth/biometric-enroll', [AuthController::class, 'enrollBiometric']);
+
         // User Routes
         Route::get('/user', [UserController::class, 'currentUser']);
         Route::get('/user/profile', [UserController::class, 'profile']);
@@ -157,6 +161,20 @@ Route::middleware('web')->group(function () {
         Route::post('/notifications/read-all', [NotificationController::class, 'markAllAsRead']);
         Route::delete('/notifications/{id}', [NotificationController::class, 'destroy']);
         Route::get('/notifications/unread-count', [NotificationController::class, 'unreadCount']);
+
+        // Chat Workspace Routes
+        Route::get('/chat/workspace', [ChatController::class, 'workspace']);
+        Route::get('/chat/sync', [ChatController::class, 'sync']);
+        Route::post('/chat/direct-conversations', [ChatController::class, 'ensureDirectConversation']);
+        Route::post('/chat/conversations/{conversation}/messages', [ChatController::class, 'sendMessage']);
+        Route::post('/chat/conversations/{conversation}/attachments', [ChatController::class, 'sendAttachment']);
+        Route::post('/chat/conversations/{conversation}/read', [ChatController::class, 'markRead']);
+        Route::patch('/chat/conversations/{conversation}/preferences', [ChatController::class, 'updatePreferences']);
+        Route::post('/chat/conversations/{conversation}/calls', [ChatController::class, 'startCall']);
+        Route::post('/chat/calls/{call}/accept', [ChatController::class, 'acceptCall']);
+        Route::post('/chat/calls/{call}/decline', [ChatController::class, 'declineCall']);
+        Route::post('/chat/calls/{call}/end', [ChatController::class, 'endCall']);
+        Route::post('/chat/calls/{call}/signal', [ChatController::class, 'signalCall']);
 
         // Helpdesk Routes
         Route::get('/helpdesk/tickets', [HelpdeskTicketController::class, 'index'])
