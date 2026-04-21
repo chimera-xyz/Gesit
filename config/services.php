@@ -42,4 +42,11 @@ return [
         'timeout' => env('ZAI_TIMEOUT', 30),
     ],
 
+    'local_ai' => [
+        'api_key' => env('LOCAL_AI_API_KEY'),
+        'base_url' => env('LOCAL_AI_BASE_URL'),
+        'model' => env('LOCAL_AI_MODEL', 'model-ai-yulie.gguf'),
+        'timeout' => env('LOCAL_AI_TIMEOUT', 60),
+    ],
+
 ];

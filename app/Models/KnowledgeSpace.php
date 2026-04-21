@@ -16,6 +16,11 @@ class KnowledgeSpace extends Model
         'description',
         'ai_instruction',
         'knowledge_text',
+        'ai_provider',
+        'ai_local_base_url',
+        'ai_local_api_key',
+        'ai_local_model',
+        'ai_local_timeout',
         'icon',
         'sort_order',
         'is_active',
@@ -29,6 +34,8 @@ class KnowledgeSpace extends Model
         return [
             'is_active' => 'boolean',
             'show_in_hub' => 'boolean',
+            'ai_local_api_key' => 'encrypted',
+            'ai_local_timeout' => 'integer',
         ];
     }
 

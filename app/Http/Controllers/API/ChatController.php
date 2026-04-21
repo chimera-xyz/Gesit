@@ -61,6 +61,56 @@ class ChatController extends Controller
         });
     }
 
+    public function stream(Request $request)
+    {
+        return $this->handleChatRequest(function () use ($request) {
+            $validated = $request->validate([
+                'after_event_id' => ['nullable', 'integer', 'min:0'],
+            ]);
+
+            $user = $request->user();
+            $afterEventId = (int) ($validated['after_event_id'] ?? 0);
+
+            return response()->stream(function () use ($user, $afterEventId) {
+                $currentAfterEventId = $afterEventId;
+                $startedAt = microtime(true);
+                $nextHeartbeatAt = microtime(true);
+
+                echo ": connected\n\n";
+                $this->flushStreamBuffers();
+
+                while (! connection_aborted() && microtime(true) - $startedAt < 55) {
+                    $this->chatWorkspaceService->expireStaleCalls();
+
+                    if ($this->chatWorkspaceService->syncHasChanges($user, $currentAfterEventId)) {
+                        $payload = $this->workspacePayload($user, $currentAfterEventId);
+                        $lastEventId = (int) ($payload['last_event_id'] ?? $currentAfterEventId);
+
+                        $this->writeServerSentEvent('workspace', $payload, $lastEventId);
+                        $currentAfterEventId = max($currentAfterEventId, $lastEventId);
+                        $nextHeartbeatAt = microtime(true) + 10;
+                        $this->flushStreamBuffers();
+
+                        continue;
+                    }
+
+                    if (microtime(true) >= $nextHeartbeatAt) {
+                        echo ": ping\n\n";
+                        $nextHeartbeatAt = microtime(true) + 10;
+                        $this->flushStreamBuffers();
+                    }
+
+                    usleep(350000);
+                }
+            }, 200, [
+                'Content-Type' => 'text/event-stream',
+                'Cache-Control' => 'no-cache, no-transform',
+                'X-Accel-Buffering' => 'no',
+                'Connection' => 'keep-alive',
+            ]);
+        });
+    }
+
     public function ensureDirectConversation(Request $request)
     {
         return $this->handleChatRequest(function () use ($request) {
@@ -227,17 +277,48 @@ class ChatController extends Controller
 
     private function workspaceResponse(User $user, int $status = 200, ?int $afterEventId = null)
     {
+        return response()->json($this->workspacePayload($user, $afterEventId), $status);
+    }
+
+    private function workspacePayload(User $user, ?int $afterEventId = null): array
+    {
         $workspace = $this->chatWorkspaceService->workspace($user);
         $events = $afterEventId === null
             ? []
             : $this->chatWorkspaceService->eventsForUserSince($user, $afterEventId);
 
-        return response()->json([
+        return [
             'has_changes' => true,
             'last_event_id' => $workspace['last_event_id'] ?? 0,
             'workspace' => $workspace,
             'events' => $events,
-        ], $status);
+        ];
+    }
+
+    private function writeServerSentEvent(string $event, array $payload, int $id): void
+    {
+        echo "event: {$event}\n";
+        if ($id > 0) {
+            echo "id: {$id}\n";
+        }
+
+        $encodedPayload = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if ($encodedPayload === false) {
+            $encodedPayload = '{}';
+        }
+
+        foreach (explode("\n", $encodedPayload) as $line) {
+            echo "data: {$line}\n";
+        }
+        echo "\n";
+    }
+
+    private function flushStreamBuffers(): void
+    {
+        if (ob_get_level() > 0) {
+            @ob_flush();
+        }
+        @flush();
     }
 
     private function handleChatRequest(callable $callback)

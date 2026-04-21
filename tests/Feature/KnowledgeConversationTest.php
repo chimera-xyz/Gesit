@@ -10,6 +10,8 @@ use App\Models\User;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class KnowledgeConversationTest extends TestCase
@@ -96,7 +98,15 @@ class KnowledgeConversationTest extends TestCase
             ->assertOk()
             ->assertJsonPath('scope', 'conversation')
             ->assertJsonPath('assistant_message.scopeLabel', null)
+            ->assertJsonPath('provider', 'system')
             ->assertJsonPath('sources', []);
+
+        $identityContent = (string) $identityResponse->json('assistant_message.content');
+
+        $this->assertStringContainsString('AI Knowledge Assistant GESIT', $identityContent);
+        $this->assertStringContainsString('Yulie Sekuritas', $identityContent);
+        $this->assertStringNotContainsString('Gemma', $identityContent);
+        $this->assertStringNotContainsString('Google DeepMind', $identityContent);
 
         $testResponse = $this->actingAs($user)->postJson('/api/knowledge-hub/ask', [
             'question' => 'test',
@@ -110,6 +120,248 @@ class KnowledgeConversationTest extends TestCase
             ->assertJsonMissing([
                 'title' => 'Test Gambar',
             ]);
+    }
+
+    public function test_identity_question_uses_system_answer_even_when_local_provider_is_active(): void
+    {
+        Http::fake([
+            'http://192.168.1.55:8080/*' => Http::response([
+                'choices' => [[
+                    'index' => 0,
+                    'finish_reason' => 'stop',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => 'Saya adalah Gemma 4.',
+                    ],
+                ]],
+            ], 200),
+        ]);
+
+        $general = KnowledgeSpace::query()
+            ->where('kind', 'general')
+            ->firstOrFail();
+
+        $general->forceFill([
+            'ai_provider' => 'local',
+            'ai_local_base_url' => '192.168.1.55:8080',
+            'ai_local_api_key' => 'local-test-key',
+            'ai_local_model' => 'model-ai-yulie.gguf',
+            'ai_local_timeout' => 60,
+        ])->save();
+        $general->ensureDefaultSection();
+
+        $user = $this->makeUserWithRole('Employee', [
+            'name' => 'Identity User',
+            'email' => 'identity.user@example.com',
+        ]);
+
+        $response = $this->actingAs($user)->postJson('/api/knowledge-hub/ask', [
+            'question' => 'kamu siapa?',
+        ]);
+
+        $response
+            ->assertOk()
+            ->assertJsonPath('scope', 'conversation')
+            ->assertJsonPath('provider', 'system')
+            ->assertJsonPath('sources', []);
+
+        $content = (string) $response->json('assistant_message.content');
+
+        $this->assertStringContainsString('AI Knowledge Assistant GESIT', $content);
+        $this->assertStringContainsString('Yulie Sekuritas', $content);
+        $this->assertStringNotContainsString('Gemma', $content);
+        $this->assertStringNotContainsString('Google DeepMind', $content);
+
+        Http::assertNothingSent();
+    }
+
+    public function test_internal_question_without_matching_document_returns_honest_not_found_answer(): void
+    {
+        $user = $this->makeUserWithRole('Employee', [
+            'name' => 'Farel Employee',
+            'email' => 'farel.employee@example.com',
+        ]);
+
+        $this->seedInternalKnowledgeEntry([
+            'title' => 'Panduan Klaim Parkir Finance',
+            'summary' => 'Alur pengajuan klaim parkir untuk tim finance.',
+            'body' => 'Dokumen ini membahas reimbursement parkir bulanan dan verifikasi kuitansi finance.',
+            'tags' => ['parkir', 'finance', 'klaim'],
+        ]);
+
+        $response = $this->actingAs($user)->postJson('/api/knowledge-hub/ask', [
+            'question' => 'gua anak IT, SOP sore itu gimana ya? lupa gua',
+        ]);
+
+        $response
+            ->assertOk()
+            ->assertJsonPath('scope', 'internal')
+            ->assertJsonPath('provider', 'system')
+            ->assertJsonPath('sources', []);
+
+        $content = (string) $response->json('assistant_message.content');
+
+        $this->assertStringContainsString('belum menemukan dokumen atau file internal', Str::lower($content));
+        $this->assertStringNotContainsString('[[DOCUMENT_CARDS]]', $content);
+        $this->assertStringNotContainsString('karena saya tidak menemukan dokumen sop spesifik', Str::lower($content));
+    }
+
+    public function test_active_local_provider_is_used_for_assistant_requests(): void
+    {
+        Http::fake([
+            'http://192.168.1.55:8080/v1/chat/completions' => Http::response([
+                'choices' => [[
+                    'index' => 0,
+                    'finish_reason' => 'stop',
+                    'message' => [
+                        'role' => 'assistant',
+                        'content' => "Silakan cek dokumen berikut.\n\n[[DOCUMENT_CARDS]]\n\nMulai dari SOP reimburse makan dinas.",
+                    ],
+                ]],
+            ], 200),
+        ]);
+
+        $this->activateLocalProvider();
+
+        $user = $this->makeUserWithRole('Employee', [
+            'name' => 'Local Provider User',
+            'email' => 'local.provider@example.com',
+        ]);
+        $entry = $this->seedInternalKnowledgeEntry();
+
+        $response = $this->actingAs($user)->postJson('/api/knowledge-hub/ask', [
+            'question' => 'Bagaimana SOP reimburse makan dinas?',
+        ]);
+
+        $response
+            ->assertOk()
+            ->assertJsonPath('provider', 'local')
+            ->assertJsonPath('scope', 'internal')
+            ->assertJsonPath('sources.0.id', $entry->id);
+
+        Http::assertSent(function ($request) {
+            return $request->url() === 'http://192.168.1.55:8080/v1/chat/completions'
+                && $request->hasHeader('Authorization', 'Bearer local-test-key')
+                && data_get($request->data(), 'model') === 'model-ai-yulie.gguf'
+                && data_get($request->data(), 'stream') === false;
+        });
+    }
+
+    public function test_follow_up_in_same_thread_reuses_active_topic_context(): void
+    {
+        Http::fake([
+            'http://192.168.1.55:8080/v1/chat/completions' => Http::sequence()
+                ->push([
+                    'choices' => [[
+                        'index' => 0,
+                        'finish_reason' => 'stop',
+                        'message' => [
+                            'role' => 'assistant',
+                            'content' => 'Saya belum punya data real-time, tapi saya bisa bantu dari konteks yang saya tahu.',
+                        ],
+                    ]],
+                ], 200)
+                ->push([
+                    'choices' => [[
+                        'index' => 0,
+                        'finish_reason' => 'stop',
+                        'message' => [
+                            'role' => 'assistant',
+                            'content' => 'Kalau dari yang saya tahu, harga saham berubah mengikuti pasar.',
+                        ],
+                    ]],
+                ], 200),
+        ]);
+
+        $this->activateLocalProvider();
+
+        $user = $this->makeUserWithRole('Employee', [
+            'name' => 'Follow Up User',
+            'email' => 'follow.up@example.com',
+        ]);
+
+        $firstResponse = $this->actingAs($user)->postJson('/api/knowledge-hub/ask', [
+            'question' => 'iyaa harga saham bca berapa hari ini',
+        ]);
+
+        $secondResponse = $this->actingAs($user)->postJson('/api/knowledge-hub/ask', [
+            'question' => 'kalo yg lu tau berapa',
+            'conversation_id' => $firstResponse->json('conversation.id'),
+        ]);
+
+        $firstResponse->assertOk();
+        $secondResponse
+            ->assertOk()
+            ->assertJsonPath('provider', 'local');
+
+        $recorded = Http::recorded();
+
+        $this->assertCount(2, $recorded);
+
+        $secondPrompt = (string) data_get($recorded[1][0]->data(), 'messages.1.content');
+
+        $this->assertStringContainsString('Riwayat percakapan terkait', $secondPrompt);
+        $this->assertStringContainsString('iyaa harga saham bca berapa hari ini', Str::lower($secondPrompt));
+        $this->assertStringContainsString('kalo yg lu tau berapa', Str::lower($secondPrompt));
+    }
+
+    public function test_explicit_new_topic_in_same_thread_drops_previous_topic_memory(): void
+    {
+        Http::fake([
+            'http://192.168.1.55:8080/v1/chat/completions' => Http::sequence()
+                ->push([
+                    'choices' => [[
+                        'index' => 0,
+                        'finish_reason' => 'stop',
+                        'message' => [
+                            'role' => 'assistant',
+                            'content' => 'Saya belum punya data real-time untuk harga saham BCA.',
+                        ],
+                    ]],
+                ], 200)
+                ->push([
+                    'choices' => [[
+                        'index' => 0,
+                        'finish_reason' => 'stop',
+                        'message' => [
+                            'role' => 'assistant',
+                            'content' => "Silakan cek dokumen berikut.\n\n[[DOCUMENT_CARDS]]\n\nMulai dari SOP reimburse makan dinas.",
+                        ],
+                    ]],
+                ], 200),
+        ]);
+
+        $this->activateLocalProvider();
+
+        $user = $this->makeUserWithRole('Employee', [
+            'name' => 'Topic Switch User',
+            'email' => 'topic.switch@example.com',
+        ]);
+        $this->seedInternalKnowledgeEntry();
+
+        $firstResponse = $this->actingAs($user)->postJson('/api/knowledge-hub/ask', [
+            'question' => 'harga saham bca berapa hari ini',
+        ]);
+
+        $secondResponse = $this->actingAs($user)->postJson('/api/knowledge-hub/ask', [
+            'question' => 'oke sekarang SOP reimburse makan dinas gimana?',
+            'conversation_id' => $firstResponse->json('conversation.id'),
+        ]);
+
+        $firstResponse->assertOk();
+        $secondResponse
+            ->assertOk()
+            ->assertJsonPath('provider', 'local');
+
+        $recorded = Http::recorded();
+
+        $this->assertCount(2, $recorded);
+
+        $secondPrompt = (string) data_get($recorded[1][0]->data(), 'messages.1.content');
+
+        $this->assertStringNotContainsString('harga saham bca berapa hari ini', Str::lower($secondPrompt));
+        $this->assertStringContainsString('Pertanyaan pengguna:', $secondPrompt);
+        $this->assertStringContainsString('SOP reimburse makan dinas', $secondPrompt);
     }
 
     public function test_knowledge_question_returns_relevant_document_with_suggested_page(): void
@@ -291,6 +543,119 @@ class KnowledgeConversationTest extends TestCase
             ->assertJsonMissing(['title' => 'Onboarding IT 7 Hari Pertama'])
             ->assertJsonMissing(['title' => 'Test File'])
             ->assertJsonMissing(['title' => 'SOP Reimburse Makan Dinas']);
+    }
+
+    public function test_explicit_accounting_query_does_not_fall_back_to_it_document(): void
+    {
+        $user = $this->makeUserWithRole('Employee', [
+            'name' => 'Mira Employee',
+            'email' => 'mira.employee@example.com',
+        ]);
+
+        $itSpace = KnowledgeSpace::query()->create([
+            'name' => 'IT',
+            'kind' => 'division',
+            'description' => 'Knowledge IT',
+            'sort_order' => 1,
+            'is_active' => true,
+        ]);
+        $itSection = KnowledgeSection::query()->create([
+            'knowledge_space_id' => $itSpace->id,
+            'name' => 'SOP',
+            'description' => 'SOP IT',
+            'sort_order' => 1,
+            'is_active' => true,
+        ]);
+
+        KnowledgeEntry::query()->create([
+            'knowledge_section_id' => $itSection->id,
+            'title' => 'HouseKeeping',
+            'summary' => 'Ini Housekeeping/SOP sore untuk divisi IT.',
+            'body' => '[Halaman 1] SOP sore divisi IT. Housekeeping dilakukan setelah pekerjaan accounting selesai.',
+            'scope' => 'internal',
+            'type' => 'sop',
+            'source_kind' => 'file',
+            'owner_name' => 'IT Operation',
+            'version_label' => 'Belum diisi',
+            'reference_notes' => 'Halaman 1',
+            'tags' => ['housekeeping', 'sore', 'accounting'],
+            'access_mode' => 'all',
+            'sort_order' => 1,
+            'is_active' => true,
+        ]);
+
+        $response = $this->actingAs($user)->postJson('/api/knowledge-hub/ask', [
+            'question' => 'gua kan accounting, gua lupa sop sore gimana',
+        ]);
+
+        $response
+            ->assertOk()
+            ->assertJsonPath('scope', 'internal')
+            ->assertJsonPath('provider', 'system')
+            ->assertJsonPath('sources', [])
+            ->assertJsonMissing(['title' => 'HouseKeeping']);
+
+        $content = (string) $response->json('assistant_message.content');
+
+        $this->assertStringContainsString('belum menemukan dokumen atau file internal', Str::lower($content));
+    }
+
+    public function test_accounting_query_can_match_finance_documents(): void
+    {
+        $user = $this->makeUserWithRole('Employee', [
+            'name' => 'Arga Employee',
+            'email' => 'arga.employee@example.com',
+        ]);
+
+        $itSpace = KnowledgeSpace::query()->create([
+            'name' => 'IT',
+            'kind' => 'division',
+            'description' => 'Knowledge IT',
+            'sort_order' => 1,
+            'is_active' => true,
+        ]);
+        $itSection = KnowledgeSection::query()->create([
+            'knowledge_space_id' => $itSpace->id,
+            'name' => 'SOP',
+            'description' => 'SOP IT',
+            'sort_order' => 1,
+            'is_active' => true,
+        ]);
+        KnowledgeEntry::query()->create([
+            'knowledge_section_id' => $itSection->id,
+            'title' => 'HouseKeeping',
+            'summary' => 'Ini Housekeeping/SOP sore untuk divisi IT.',
+            'body' => '[Halaman 1] SOP sore divisi IT. Housekeeping dilakukan setelah pekerjaan accounting selesai.',
+            'scope' => 'internal',
+            'type' => 'sop',
+            'source_kind' => 'file',
+            'access_mode' => 'all',
+            'sort_order' => 1,
+            'is_active' => true,
+        ]);
+
+        $financeEntry = $this->seedInternalKnowledgeEntry([
+            'title' => 'SOP Sore Accounting',
+            'summary' => 'Checklist SOP sore untuk Finance Accounting.',
+            'body' => implode("\n", [
+                '[Halaman 1] SOP sore untuk tim finance accounting.',
+                '1. Cocokkan saldo kas dan bank.',
+                '2. Review jurnal dan transaksi hari berjalan.',
+                '3. Simpan bukti dan file closing harian.',
+            ]),
+            'tags' => ['accounting', 'finance', 'sore', 'closing'],
+        ]);
+
+        $response = $this->actingAs($user)->postJson('/api/knowledge-hub/ask', [
+            'question' => 'gua kan accounting, gua lupa sop sore gimana',
+        ]);
+
+        $response
+            ->assertOk()
+            ->assertJsonPath('scope', 'internal')
+            ->assertJsonPath('sources.0.id', $financeEntry->id)
+            ->assertJsonPath('sources.0.space_name', 'Finance')
+            ->assertJsonMissing(['title' => 'HouseKeeping']);
     }
 
     public function test_user_can_list_search_and_view_only_own_conversations(): void
@@ -484,5 +849,21 @@ class KnowledgeConversationTest extends TestCase
         $user->assignRole($role);
 
         return $user;
+    }
+
+    private function activateLocalProvider(array $overrides = []): void
+    {
+        $general = KnowledgeSpace::query()
+            ->where('kind', 'general')
+            ->firstOrFail();
+
+        $general->forceFill(array_merge([
+            'ai_provider' => 'local',
+            'ai_local_base_url' => '192.168.1.55:8080',
+            'ai_local_api_key' => 'local-test-key',
+            'ai_local_model' => 'model-ai-yulie.gguf',
+            'ai_local_timeout' => 60,
+        ], $overrides))->save();
+        $general->ensureDefaultSection();
     }
 }

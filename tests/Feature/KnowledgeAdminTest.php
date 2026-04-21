@@ -29,6 +29,7 @@ class KnowledgeAdminTest extends TestCase
             ->getJson('/api/knowledge-admin')
             ->assertOk()
             ->assertJsonPath('general.kind', 'general')
+            ->assertJsonPath('general.ai_provider', 'zai')
             ->assertJsonPath('general.show_in_hub', false)
             ->assertJsonCount(0, 'divisions');
     }
@@ -42,10 +43,21 @@ class KnowledgeAdminTest extends TestCase
                 'description' => 'Knowledge utama untuk seluruh AI assistant.',
                 'ai_instruction' => 'Jangan mengarang dan prioritaskan SOP terbaru.',
                 'knowledge_text' => 'Gunakan bahasa Indonesia dan arahkan user ke dokumen jika perlu detail.',
+                'ai_provider' => 'local',
+                'ai_local_base_url' => '192.168.1.55:8080',
+                'ai_local_api_key' => 'secret-local-key',
+                'ai_local_model' => 'model-ai-yulie.gguf',
+                'ai_local_timeout' => 60,
                 'is_active' => true,
             ])
             ->assertOk()
-            ->assertJsonPath('general.ai_instruction', 'Jangan mengarang dan prioritaskan SOP terbaru.');
+            ->assertJsonPath('general.ai_instruction', 'Jangan mengarang dan prioritaskan SOP terbaru.')
+            ->assertJsonPath('general.ai_provider', 'local')
+            ->assertJsonPath('general.ai_local_base_url', '192.168.1.55:8080')
+            ->assertJsonPath('general.ai_local_model', 'model-ai-yulie.gguf')
+            ->assertJsonPath('general.ai_local_timeout', 60)
+            ->assertJsonPath('general.has_ai_local_api_key', true)
+            ->assertJsonMissingPath('general.ai_local_api_key');
 
         $divisionResponse = $this->actingAs($admin)
             ->postJson('/api/knowledge-admin/spaces', [
@@ -94,6 +106,8 @@ class KnowledgeAdminTest extends TestCase
             ->getJson('/api/knowledge-admin')
             ->assertOk()
             ->assertJsonPath('general.description', 'Knowledge utama untuk seluruh AI assistant.')
+            ->assertJsonPath('general.ai_provider', 'local')
+            ->assertJsonPath('general.has_ai_local_api_key', true)
             ->assertJsonCount(1, 'divisions')
             ->assertJsonPath('divisions.0.document_count', 1)
             ->assertJsonPath('divisions.0.documents.0.title', 'SOP Ganti Password');

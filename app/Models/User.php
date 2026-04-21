@@ -187,4 +187,19 @@ class User extends Authenticatable
     {
         return $this->hasMany(MobileAuthToken::class);
     }
+
+    public function feedPosts()
+    {
+        return $this->hasMany(FeedPost::class);
+    }
+
+    public function feedComments()
+    {
+        return $this->hasMany(FeedComment::class);
+    }
+
+    public function feedLikes()
+    {
+        return $this->hasMany(FeedLike::class);
+    }
 }

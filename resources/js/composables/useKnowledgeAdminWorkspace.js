@@ -6,6 +6,13 @@ const defaultGeneralForm = () => ({
   description: '',
   ai_instruction: '',
   knowledge_text: '',
+  ai_provider: 'zai',
+  ai_local_base_url: '',
+  ai_local_api_key: '',
+  ai_local_model: '',
+  ai_local_timeout: 60,
+  has_ai_local_api_key: false,
+  clear_ai_local_api_key: false,
   icon: 'sparkles',
   is_active: true,
 });
@@ -98,6 +105,13 @@ export const useKnowledgeAdminWorkspace = () => {
       description: payload?.description || '',
       ai_instruction: payload?.ai_instruction || '',
       knowledge_text: payload?.knowledge_text || '',
+      ai_provider: payload?.ai_provider || 'zai',
+      ai_local_base_url: payload?.ai_local_base_url || '',
+      ai_local_api_key: '',
+      ai_local_model: payload?.ai_local_model || '',
+      ai_local_timeout: payload?.ai_local_timeout || 60,
+      has_ai_local_api_key: payload?.has_ai_local_api_key ?? false,
+      clear_ai_local_api_key: false,
       icon: payload?.icon || 'sparkles',
       is_active: payload?.is_active ?? true,
     });
@@ -211,7 +225,10 @@ export const useKnowledgeAdminWorkspace = () => {
     error.value = '';
 
     try {
-      await knowledgeStore.saveGeneral({ ...generalForm });
+      await knowledgeStore.saveGeneral({
+        ...generalForm,
+        has_ai_local_api_key: undefined,
+      });
       await refreshAdmin();
     } catch (err) {
       if (err.response?.status === 422) {

@@ -65,6 +65,10 @@ class AdminKnowledgeController extends Controller
                         ['value' => 'all', 'label' => 'Semua pengguna Knowledge Hub'],
                         ['value' => 'role_based', 'label' => 'Batasi ke role tertentu'],
                     ],
+                    'ai_providers' => [
+                        ['value' => 'zai', 'label' => 'GLM / Z.ai'],
+                        ['value' => 'local', 'label' => 'AI Local'],
+                    ],
                 ],
             ]);
         } catch (\Throwable $exception) {
@@ -81,12 +85,13 @@ class AdminKnowledgeController extends Controller
         try {
             $general = $this->ensureGeneralSpace();
             $validated = $request->validate($this->generalRules());
+            $payload = $this->normalizeGeneralPayload($request, $validated);
 
             $general->fill([
-                ...$validated,
+                ...$payload,
                 'kind' => 'general',
                 'show_in_hub' => false,
-                'icon' => $validated['icon'] ?? $general->icon ?? 'sparkles',
+                'icon' => $payload['icon'] ?? $general->icon ?? 'sparkles',
             ]);
             $general->updated_by = $request->user()->id;
             $general->save();
@@ -367,9 +372,49 @@ class AdminKnowledgeController extends Controller
             'description' => ['sometimes', 'nullable', 'string', 'max:255'],
             'ai_instruction' => ['sometimes', 'nullable', 'string'],
             'knowledge_text' => ['sometimes', 'nullable', 'string'],
+            'ai_provider' => ['sometimes', Rule::in(['zai', 'local'])],
+            'ai_local_base_url' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'ai_local_api_key' => ['sometimes', 'nullable', 'string'],
+            'ai_local_model' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'ai_local_timeout' => ['sometimes', 'nullable', 'integer', 'min:5', 'max:300'],
+            'clear_ai_local_api_key' => ['sometimes', 'boolean'],
             'icon' => ['sometimes', 'nullable', 'string', 'max:40'],
             'is_active' => ['sometimes', 'boolean'],
         ];
+    }
+
+    private function normalizeGeneralPayload(Request $request, array $validated): array
+    {
+        $payload = $validated;
+
+        foreach ([
+            'description',
+            'ai_instruction',
+            'knowledge_text',
+            'ai_local_base_url',
+            'ai_local_model',
+            'icon',
+        ] as $field) {
+            if (array_key_exists($field, $payload)) {
+                $payload[$field] = $this->nullableTrim($payload[$field]);
+            }
+        }
+
+        if ($request->boolean('clear_ai_local_api_key')) {
+            $payload['ai_local_api_key'] = null;
+        } elseif (array_key_exists('ai_local_api_key', $validated)) {
+            $normalizedApiKey = $this->nullableTrim($validated['ai_local_api_key']);
+
+            if ($normalizedApiKey === null) {
+                unset($payload['ai_local_api_key']);
+            } else {
+                $payload['ai_local_api_key'] = $normalizedApiKey;
+            }
+        }
+
+        unset($payload['clear_ai_local_api_key']);
+
+        return $payload;
     }
 
     private function divisionRules(bool $isUpdate = false): array
@@ -533,13 +578,25 @@ class AdminKnowledgeController extends Controller
                 'sort_order' => 0,
                 'is_active' => true,
                 'show_in_hub' => false,
+                'ai_provider' => 'zai',
             ]
         );
 
         $space->ensureDefaultSection();
 
+        $needsSave = false;
+
         if ($space->show_in_hub) {
             $space->show_in_hub = false;
+            $needsSave = true;
+        }
+
+        if (! $space->ai_provider) {
+            $space->ai_provider = 'zai';
+            $needsSave = true;
+        }
+
+        if ($needsSave) {
             $space->save();
         }
 
@@ -566,6 +623,11 @@ class AdminKnowledgeController extends Controller
             'description' => $space->description,
             'ai_instruction' => $space->ai_instruction,
             'knowledge_text' => $space->knowledge_text,
+            'ai_provider' => $space->ai_provider ?: 'zai',
+            'ai_local_base_url' => $space->ai_local_base_url,
+            'ai_local_model' => $space->ai_local_model,
+            'ai_local_timeout' => $space->ai_local_timeout,
+            'has_ai_local_api_key' => filled($space->ai_local_api_key),
             'icon' => $space->icon ?: ($space->kind === 'general' ? 'sparkles' : 'folder'),
             'sort_order' => (int) $space->sort_order,
             'is_active' => (bool) $space->is_active,

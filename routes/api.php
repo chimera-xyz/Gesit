@@ -7,6 +7,7 @@ use App\Http\Controllers\API\AuthController;
 use App\Http\Controllers\API\ChatController;
 use App\Http\Controllers\API\FormController;
 use App\Http\Controllers\API\FormSubmissionController;
+use App\Http\Controllers\API\FeedController;
 use App\Http\Controllers\API\HelpdeskTicketController;
 use App\Http\Controllers\API\ItActivityController;
 use App\Http\Controllers\API\KnowledgeHubController;
@@ -21,10 +22,8 @@ use App\Http\Controllers\API\WorkflowController;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware('web')->group(function () {
-    Route::middleware('guest')->group(function () {
-        Route::post('/auth/login', [AuthController::class, 'login']);
-        Route::post('/auth/register', [AuthController::class, 'register']);
-    });
+    Route::post('/auth/login', [AuthController::class, 'login']);
+    Route::post('/auth/register', [AuthController::class, 'register']);
 
     Route::post('/auth/biometric-login', [AuthController::class, 'biometricLogin']);
     Route::post('/auth/logout', [AuthController::class, 'logout'])
@@ -154,6 +153,16 @@ Route::middleware('web')->group(function () {
         Route::post('/form-submissions/{id}/reject', [FormSubmissionController::class, 'reject'])
             ->middleware('permission:reject forms');
 
+        // Feed Routes
+        Route::get('/feed', [FeedController::class, 'index']);
+        Route::post('/feed/posts', [FeedController::class, 'store']);
+        Route::get('/feed/posts/{post}', [FeedController::class, 'show']);
+        Route::delete('/feed/posts/{post}', [FeedController::class, 'destroy']);
+        Route::post('/feed/posts/{post}/likes/toggle', [FeedController::class, 'togglePostLike']);
+        Route::post('/feed/posts/{post}/comments', [FeedController::class, 'storeComment']);
+        Route::delete('/feed/comments/{comment}', [FeedController::class, 'destroyComment']);
+        Route::post('/feed/comments/{comment}/likes/toggle', [FeedController::class, 'toggleCommentLike']);
+
         // Notification Routes
         Route::get('/notifications', [NotificationController::class, 'index']);
         Route::get('/notifications/unread-feed', [NotificationController::class, 'unreadFeed']);
@@ -164,6 +173,7 @@ Route::middleware('web')->group(function () {
 
         // Chat Workspace Routes
         Route::get('/chat/workspace', [ChatController::class, 'workspace']);
+        Route::get('/chat/stream', [ChatController::class, 'stream']);
         Route::get('/chat/sync', [ChatController::class, 'sync']);
         Route::post('/chat/direct-conversations', [ChatController::class, 'ensureDirectConversation']);
         Route::post('/chat/conversations/{conversation}/messages', [ChatController::class, 'sendMessage']);

@@ -21,6 +21,7 @@ const emptyAdminState = () => ({
         scopes: [],
         source_kinds: [],
         access_modes: [],
+        ai_providers: [],
     },
 });
 
