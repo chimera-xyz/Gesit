@@ -152,6 +152,12 @@ const router = createRouter({
             meta: { requiresAuth: true, requiresRole: 'Admin' }
         },
         {
+            path: '/settings/mobile-app',
+            name: 'settings-mobile-app',
+            component: () => import('./components/MobileAppReleases/Index.vue'),
+            meta: { requiresAuth: true, requiresRole: 'Admin' }
+        },
+        {
             path: '/users',
             name: 'users',
             component: () => import('./components/Users/Index.vue'),

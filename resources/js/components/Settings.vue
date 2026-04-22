@@ -95,5 +95,13 @@ const settingMenus = [
     icon: 'settings',
     tags: ['Knowledge', 'AI', 'Divisi'],
   },
+  {
+    id: 5,
+    title: 'Mobile App Releases',
+    description: 'Upload APK Android, tentukan force update, dan publish release update internal tanpa Play Store.',
+    to: '/settings/mobile-app',
+    icon: 'settings',
+    tags: ['Android', 'APK', 'Update'],
+  },
 ];
 </script>

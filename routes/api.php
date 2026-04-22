@@ -11,6 +11,7 @@ use App\Http\Controllers\API\FeedController;
 use App\Http\Controllers\API\HelpdeskTicketController;
 use App\Http\Controllers\API\ItActivityController;
 use App\Http\Controllers\API\KnowledgeHubController;
+use App\Http\Controllers\API\MobileAppReleaseController;
 use App\Http\Controllers\API\NotificationController;
 use App\Http\Controllers\API\PDFController;
 use App\Http\Controllers\API\SignatureController;
@@ -24,6 +25,10 @@ use Illuminate\Support\Facades\Route;
 Route::middleware('web')->group(function () {
     Route::post('/auth/login', [AuthController::class, 'login']);
     Route::post('/auth/register', [AuthController::class, 'register']);
+    Route::get('/mobile-app/releases/latest', [MobileAppReleaseController::class, 'latest']);
+    Route::get('/mobile-app/releases/{id}/download', [MobileAppReleaseController::class, 'download'])
+        ->name('api.mobile-app.releases.download')
+        ->middleware('signed');
 
     Route::post('/auth/biometric-login', [AuthController::class, 'biometricLogin']);
     Route::post('/auth/logout', [AuthController::class, 'logout'])
@@ -52,6 +57,18 @@ Route::middleware('web')->group(function () {
         Route::put('/roles/{id}', [AdminRoleController::class, 'update'])
             ->middleware('role:Admin');
         Route::delete('/roles/{id}', [AdminRoleController::class, 'destroy'])
+            ->middleware('role:Admin');
+        Route::get('/mobile-app/releases', [MobileAppReleaseController::class, 'index'])
+            ->middleware('role:Admin');
+        Route::post('/mobile-app/releases', [MobileAppReleaseController::class, 'store'])
+            ->middleware('role:Admin');
+        Route::put('/mobile-app/releases/{id}', [MobileAppReleaseController::class, 'update'])
+            ->middleware('role:Admin');
+        Route::post('/mobile-app/releases/{id}/publish', [MobileAppReleaseController::class, 'publish'])
+            ->middleware('role:Admin');
+        Route::post('/mobile-app/releases/{id}/unpublish', [MobileAppReleaseController::class, 'unpublish'])
+            ->middleware('role:Admin');
+        Route::delete('/mobile-app/releases/{id}', [MobileAppReleaseController::class, 'destroy'])
             ->middleware('role:Admin');
         Route::get('/knowledge-admin', [AdminKnowledgeController::class, 'index'])
             ->middleware('permission:manage knowledge hub');
