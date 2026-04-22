@@ -6,10 +6,10 @@
           <img :src="companyLogo" alt="PT. Yulie Sekuritas Indonesia Tbk." class="h-12 w-auto sm:h-[3.4rem]">
           <p class="mt-6 text-[11px] font-semibold uppercase tracking-[0.28em] text-[#a57e3a]">Internal Access</p>
           <h1 class="mt-3 text-[1.82rem] font-semibold leading-tight text-[#111827]">
-            Masuk ke SiGesit
+            Masuk ke Portal Gesit
           </h1>
           <p class="mt-2 text-sm leading-6 text-[#6b7280]">
-            Gunakan akun internal perusahaan untuk mengakses SiGesit.
+            Gunakan satu akun internal untuk masuk ke Gesit atau Inventaris IT sesuai akses Anda.
           </p>
         </div>
 
@@ -109,10 +109,19 @@ const handleLogin = async () => {
     const response = await axios.post('/api/auth/login', {
       email: formData.value.email,
       password: formData.value.password,
+      remember: formData.value.remember,
     });
 
     authStore.hydrate(response.data);
-    router.replace(route.query.redirect || '/');
+    const redirectTarget = typeof route.query.redirect === 'string' ? route.query.redirect : null;
+    const { target, useLocation } = authStore.resolvePostLoginTarget(redirectTarget);
+
+    if (useLocation) {
+      window.location.replace(target);
+      return;
+    }
+
+    await router.replace(target);
   } catch (err) {
     console.error('Login error:', err);
     error.value = err.response?.data?.message || 'Email atau password salah. Silakan coba lagi.';

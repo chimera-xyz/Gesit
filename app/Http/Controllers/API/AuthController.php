@@ -5,6 +5,7 @@ namespace App\Http\Controllers\API;
 use App\Http\Controllers\Controller;
 use App\Models\MobileAuthToken;
 use App\Models\User;
+use App\Support\PortalRegistry;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
@@ -14,6 +15,8 @@ use Illuminate\Support\Str;
 
 class AuthController extends Controller
 {
+    public function __construct(private readonly PortalRegistry $portalRegistry) {}
+
     public function login(Request $request)
     {
         $validator = Validator::make($request->all(), [
@@ -177,14 +180,10 @@ class AuthController extends Controller
         array $extra = [],
     )
     {
-        $user->load('roles');
-
-        return response()->json([
-            'user' => $user,
-            'roles' => $user->roles->pluck('name')->values(),
-            'permissions' => $user->getAllPermissions()->pluck('name')->values(),
-            ...$extra,
-        ], $status);
+        return response()->json(
+            $this->portalRegistry->authPayloadFor($user, $extra),
+            $status,
+        );
     }
 
     private function issueMobileAuthToken(

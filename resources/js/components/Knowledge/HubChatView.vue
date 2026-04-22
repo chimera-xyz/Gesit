@@ -60,7 +60,7 @@
             </div>
 
             <div v-if="message.sources?.length" class="mt-4 space-y-3">
-              <p class="text-xs font-semibold uppercase tracking-[0.18em] text-[#9ca3af]">Dokumen terkait</p>
+              <p class="text-xs font-semibold uppercase tracking-[0.18em] text-[#9ca3af]">Referensi terkait</p>
               <button
                 v-for="source in message.sources"
                 :key="`${message.id}-${source.id}`"
@@ -222,6 +222,11 @@ const sourceClosing = (message) => {
 };
 
 const openSource = async (source) => {
+  if (source?.external_url) {
+    window.open(source.external_url, '_blank', 'noopener,noreferrer');
+    return;
+  }
+
   const entry = openSourceFromChat(source);
 
   if (!entry) {

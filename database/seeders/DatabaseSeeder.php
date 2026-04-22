@@ -72,5 +72,18 @@ class DatabaseSeeder extends Seeder
             'employee_id' => 'ACC-001',
         ]);
         $accounting->syncRoles(['Accounting']);
+
+        $inventarisAdmin = User::updateOrCreate([
+            'email' => 'admin@inventaris.com',
+        ], [
+            'name' => 'Inventaris Admin',
+            'password' => Hash::make('inventaris123'),
+            'department' => 'IT Asset Management',
+            'employee_id' => 'INV-001',
+            'allowed_apps' => ['inventaris'],
+            'home_app' => 'inventaris',
+            'is_active' => true,
+        ]);
+        $inventarisAdmin->syncRoles(['Employee']);
     }
 }

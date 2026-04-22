@@ -4,12 +4,15 @@ namespace App\Http\Controllers\API;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Support\PortalRegistry;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 
 class UserController extends Controller
 {
+    public function __construct(private readonly PortalRegistry $portalRegistry) {}
+
     /**
      * Get current authenticated user
      */
@@ -19,9 +22,7 @@ class UserController extends Controller
             $user = auth()->user();
 
             return response()->json([
-                'user' => $user,
-                'roles' => $user->roles->pluck('name'),
-                'permissions' => $user->getAllPermissions()->pluck('name'),
+                ...$this->portalRegistry->authPayloadFor($user),
             ]);
         } catch (\Exception $e) {
             Log::error('Get Current User Error: ' . $e->getMessage());
@@ -36,9 +37,11 @@ class UserController extends Controller
     {
         try {
             $user = auth()->user();
+            $user->loadMissing('roles');
 
             return response()->json([
                 'user' => $user,
+                'portal' => $this->portalRegistry->portalPayloadFor($user),
             ]);
         } catch (\Exception $e) {
             Log::error('Get Profile Error: ' . $e->getMessage());

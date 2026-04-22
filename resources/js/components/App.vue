@@ -3,7 +3,7 @@
     <nav v-if="showShell" class="sticky top-0 z-40 border-b border-[#efe5d7] bg-white/95 backdrop-blur-xl">
       <div class="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
         <div class="flex min-w-0 items-center gap-4">
-          <router-link to="/" class="flex min-w-0 items-center gap-3">
+          <router-link :to="homeLink" class="flex min-w-0 items-center gap-3">
             <img :src="companyLogo" alt="PT Yulie Sekuritas Indonesia Tbk." class="h-11 w-auto sm:h-12">
           </router-link>
 
@@ -349,11 +349,20 @@ const mainContentClass = computed(() => (
 ));
 const showFooter = computed(() => showShell.value && !isKnowledgeWorkspace.value);
 const activeToast = computed(() => notificationStore.activeToast);
+const homeLink = computed(() => (authStore.hasAppAccess('gesit') ? '/' : '/portal'));
 
 const navigation = computed(() => {
-  const items = [
-    { name: 'dashboard', label: 'Beranda', to: '/' },
-  ];
+  const items = [];
+
+  if (authStore.launcherVisible) {
+    items.push({ name: 'portal', label: 'Portal', to: '/portal' });
+  }
+
+  if (!authStore.hasAppAccess('gesit')) {
+    return items;
+  }
+
+  items.push({ name: 'dashboard', label: 'Beranda', to: '/' });
 
   if (authStore.hasPermission('view forms')) {
     items.push({ name: 'forms', label: 'Form', to: '/forms' });

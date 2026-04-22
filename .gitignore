@@ -17,6 +17,7 @@
 /public/hot
 /public/storage
 /tmp
+/.codex-work
 /GESIT_*.pdf
 /storage/*.key
 /storage/pail

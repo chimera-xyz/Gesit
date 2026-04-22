@@ -103,6 +103,18 @@
               <td class="px-6 py-5 text-sm text-gray-700">
                 <p>{{ user.department || '-' }}</p>
                 <p v-if="user.phone_number" class="mt-2 text-xs text-gray-500">{{ user.phone_number }}</p>
+                <div v-if="user.allowed_apps?.length" class="mt-3 flex flex-wrap gap-2">
+                  <span
+                    v-for="appKey in user.allowed_apps"
+                    :key="`${user.id}-${appKey}`"
+                    class="rounded-full bg-[#f5f7fb] px-3 py-1 text-[11px] font-semibold text-[#475569]"
+                  >
+                    {{ appLabel(appKey) }}
+                  </span>
+                </div>
+                <p v-if="user.home_app" class="mt-2 text-xs text-gray-500">
+                  Default login: {{ appLabel(user.home_app) }}
+                </p>
               </td>
               <td class="px-6 py-5">
                 <div class="flex flex-wrap gap-2">
@@ -179,6 +191,7 @@
       :mode="modalMode"
       :user="selectedUser"
       :roles="roles"
+      :app-catalog="appCatalog"
       :saving="isSaving"
       :errors="formErrors"
       @close="closeModal"
@@ -215,6 +228,7 @@ const filters = ref({
 
 const users = computed(() => userStore.users);
 const roles = computed(() => userStore.roles);
+const appCatalog = computed(() => userStore.appCatalog);
 
 const filteredUsers = computed(() => {
   const search = filters.value.search.trim().toLowerCase();
@@ -259,6 +273,10 @@ const formatDate = (value) => {
     minute: '2-digit',
   });
 };
+
+const appLabel = (appKey) => (
+  appCatalog.value.find((app) => app.key === appKey)?.name || appKey
+);
 
 const closeMenu = () => {
   openMenuId.value = null;
@@ -316,6 +334,8 @@ const sanitizePayload = (payload) => {
     employee_id: payload.employee_id,
     s21plus_user_id: payload.s21plus_user_id,
     phone_number: payload.phone_number,
+    allowed_apps: payload.allowed_apps,
+    home_app: payload.home_app,
     roles: payload.roles,
     is_active: payload.is_active,
   };

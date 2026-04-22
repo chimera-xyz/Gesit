@@ -15,9 +15,24 @@ class KnowledgeAssistantService
     private const MAX_SOURCE_COUNT = 4;
     private const MIN_SOURCE_SCORE = 24;
 
+    public function __construct(
+        private readonly InventoryAssistantService $inventoryAssistantService,
+    ) {}
+
     public function answer(User $user, string $question, array $conversationHistory = []): array
     {
         $normalizedQuestion = trim($question);
+
+        $inventoryAnswer = $this->inventoryAssistantService->maybeAnswer(
+            $user,
+            $normalizedQuestion,
+            $conversationHistory,
+        );
+
+        if (is_array($inventoryAnswer)) {
+            return $inventoryAnswer;
+        }
+
         $intent = $this->detectIntent($normalizedQuestion, $conversationHistory);
 
         if ($intent['type'] === 'conversation') {

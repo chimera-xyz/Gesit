@@ -1164,6 +1164,7 @@ class KnowledgeHubController extends Controller
     {
         return match ($scope) {
             'internal' => 'Internal',
+            'inventory' => 'Inventaris IT',
             'securities_domain' => 'Domain Sekuritas',
             'error' => 'Error',
             default => null,

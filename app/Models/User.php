@@ -30,6 +30,8 @@ class User extends Authenticatable
         'phone_number',
         'signature_path',
         'is_active',
+        'allowed_apps',
+        'home_app',
     ];
 
     /**
@@ -62,6 +64,7 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'is_active' => 'boolean',
+            'allowed_apps' => 'array',
         ];
     }
 
@@ -111,6 +114,11 @@ class User extends Authenticatable
     public function notifications()
     {
         return $this->hasMany(Notification::class, 'user_id');
+    }
+
+    public function notificationDevices()
+    {
+        return $this->hasMany(NotificationDevice::class);
     }
 
     /**

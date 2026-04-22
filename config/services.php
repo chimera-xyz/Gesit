@@ -49,4 +49,18 @@ return [
         'timeout' => env('LOCAL_AI_TIMEOUT', 60),
     ],
 
+    'inventory' => [
+        'base_url' => env('INVENTORY_ASSISTANT_BASE_URL'),
+        'assistant_secret' => env('INVENTORY_ASSISTANT_SECRET'),
+        'timeout' => env('INVENTORY_ASSISTANT_TIMEOUT', 12),
+    ],
+
+    'fcm' => [
+        'enabled' => env('FCM_ENABLED', true),
+        'project_id' => env('FCM_PROJECT_ID'),
+        'service_account_path' => env('FCM_SERVICE_ACCOUNT_PATH'),
+        'service_account_json' => env('FCM_SERVICE_ACCOUNT_JSON'),
+        'token_uri' => env('FCM_TOKEN_URI', 'https://oauth2.googleapis.com/token'),
+    ],
+
 ];

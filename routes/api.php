@@ -166,9 +166,13 @@ Route::middleware('web')->group(function () {
         // Notification Routes
         Route::get('/notifications', [NotificationController::class, 'index']);
         Route::get('/notifications/unread-feed', [NotificationController::class, 'unreadFeed']);
+        Route::get('/notifications/stream', [NotificationController::class, 'stream']);
+        Route::post('/notifications/devices', [NotificationController::class, 'registerDeviceToken']);
+        Route::delete('/notifications/devices', [NotificationController::class, 'unregisterDeviceToken']);
         Route::post('/notifications/{id}/read', [NotificationController::class, 'markAsRead']);
         Route::post('/notifications/read-all', [NotificationController::class, 'markAllAsRead']);
         Route::delete('/notifications/{id}', [NotificationController::class, 'destroy']);
+        Route::delete('/notifications', [NotificationController::class, 'destroyAll']);
         Route::get('/notifications/unread-count', [NotificationController::class, 'unreadCount']);
 
         // Chat Workspace Routes

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\API;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Support\PortalRegistry;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -15,6 +16,8 @@ use Spatie\Permission\Models\Role;
 
 class AdminUserController extends Controller
 {
+    public function __construct(private readonly PortalRegistry $portalRegistry) {}
+
     /**
      * List active and inactive users for admin management.
      */
@@ -56,6 +59,7 @@ class AdminUserController extends Controller
             return response()->json([
                 'users' => $users,
                 'roles' => $this->availableRoles(),
+                'app_catalog' => $this->portalRegistry->appCatalog(),
             ]);
         } catch (ValidationException|HttpResponseException $e) {
             throw $e;
@@ -75,6 +79,8 @@ class AdminUserController extends Controller
             $validated = $request->validate($this->validationRules());
 
             $user = DB::transaction(function () use ($validated) {
+                [$allowedApps, $homeApp] = $this->resolvePortalAccess($validated);
+
                 $user = User::create([
                     'name' => trim($validated['name']),
                     'email' => trim($validated['email']),
@@ -84,6 +90,8 @@ class AdminUserController extends Controller
                     's21plus_user_id' => $this->nullableTrim($validated['s21plus_user_id'] ?? null),
                     'phone_number' => $this->nullableTrim($validated['phone_number'] ?? null),
                     'is_active' => $validated['is_active'] ?? true,
+                    'allowed_apps' => $allowedApps,
+                    'home_app' => $homeApp,
                 ]);
 
                 $user->syncRoles($validated['roles']);
@@ -115,10 +123,11 @@ class AdminUserController extends Controller
 
             $roles = $validated['roles'] ?? $user->roles->pluck('name')->all();
             $isActive = array_key_exists('is_active', $validated) ? (bool) $validated['is_active'] : (bool) $user->is_active;
+            [$allowedApps, $homeApp] = $this->resolvePortalAccess($validated, $user);
 
             $this->guardCriticalAdminMutation($user, $roles, $isActive);
 
-            DB::transaction(function () use ($user, $validated, $roles, $isActive) {
+            DB::transaction(function () use ($user, $validated, $roles, $isActive, $allowedApps, $homeApp) {
                 $user->fill([
                     'name' => array_key_exists('name', $validated) ? trim($validated['name']) : $user->name,
                     'email' => array_key_exists('email', $validated) ? trim($validated['email']) : $user->email,
@@ -127,6 +136,8 @@ class AdminUserController extends Controller
                     's21plus_user_id' => array_key_exists('s21plus_user_id', $validated) ? $this->nullableTrim($validated['s21plus_user_id']) : $user->s21plus_user_id,
                     'phone_number' => array_key_exists('phone_number', $validated) ? $this->nullableTrim($validated['phone_number']) : $user->phone_number,
                     'is_active' => $isActive,
+                    'allowed_apps' => $allowedApps,
+                    'home_app' => $homeApp,
                 ]);
 
                 if (!empty($validated['password'])) {
@@ -195,6 +206,9 @@ class AdminUserController extends Controller
             'employee_id' => ['sometimes', 'nullable', 'string', 'max:50', Rule::unique('users', 'employee_id')->ignore($userId)],
             's21plus_user_id' => ['sometimes', 'nullable', 'string', 'max:120', Rule::unique('users', 's21plus_user_id')->ignore($userId)],
             'phone_number' => ['sometimes', 'nullable', 'string', 'max:20'],
+            'allowed_apps' => ['sometimes', 'array', 'min:1'],
+            'allowed_apps.*' => ['sometimes', 'string', Rule::in($this->portalRegistry->appKeys())],
+            'home_app' => ['sometimes', 'nullable', 'string', Rule::in($this->portalRegistry->appKeys())],
             'roles' => [$isUpdate ? 'sometimes' : 'required', 'array', 'min:1'],
             'roles.*' => ['sometimes', 'string', Rule::exists('roles', 'name')],
             'is_active' => ['sometimes', 'boolean'],
@@ -216,6 +230,8 @@ class AdminUserController extends Controller
             's21plus_user_id' => $user->s21plus_user_id,
             'phone_number' => $user->phone_number,
             'is_active' => (bool) $user->is_active,
+            'allowed_apps' => $this->portalRegistry->allowedAppsFor($user),
+            'home_app' => $this->portalRegistry->homeAppFor($user),
             'roles' => $user->roles->pluck('name')->values()->all(),
             'primary_role' => $user->roles->pluck('name')->first(),
             'is_current_user' => (int) $user->id === (int) auth()->id(),
@@ -233,6 +249,34 @@ class AdminUserController extends Controller
             ->pluck('name')
             ->values()
             ->all();
+    }
+
+    private function resolvePortalAccess(array $validated, ?User $user = null): array
+    {
+        $email = array_key_exists('email', $validated)
+            ? trim((string) $validated['email'])
+            : $user?->email;
+
+        $allowedApps = array_key_exists('allowed_apps', $validated)
+            ? $this->portalRegistry->normalizeAllowedApps($validated['allowed_apps'], $email)
+            : ($user ? $this->portalRegistry->allowedAppsFor($user) : $this->portalRegistry->normalizeAllowedApps(null, $email));
+
+        $requestedHomeApp = array_key_exists('home_app', $validated)
+            ? $this->nullableTrim($validated['home_app'])
+            : ($user?->home_app);
+
+        if ($requestedHomeApp !== null && ! in_array($requestedHomeApp, $allowedApps, true)) {
+            throw new HttpResponseException(response()->json([
+                'errors' => [
+                    'home_app' => ['Default landing harus termasuk dalam akses aplikasi user.'],
+                ],
+            ], 422));
+        }
+
+        return [
+            $allowedApps,
+            $this->portalRegistry->resolveHomeApp($requestedHomeApp, $allowedApps, $email),
+        ];
     }
 
     private function nullableTrim(?string $value): ?string

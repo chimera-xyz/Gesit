@@ -15,6 +15,12 @@ const router = createRouter({
             meta: { requiresAuth: true }
         },
         {
+            path: '/portal',
+            name: 'portal',
+            component: () => import('./components/PortalLauncher.vue'),
+            meta: { requiresAuth: true }
+        },
+        {
             path: '/forms',
             name: 'forms',
             component: () => import('./components/Forms/Index.vue'),
@@ -198,6 +204,9 @@ const ensureAuthState = async () => {
 router.beforeEach(async (to) => {
     await ensureAuthState();
 
+    const hasPortalNotice = ['inventory_error', 'access_denied', 'launch_unavailable']
+        .some((key) => typeof to.query[key] === 'string' && to.query[key] !== '');
+
     if (to.meta.requiresAuth && !authStore.isAuthenticated) {
         return {
             name: 'login',
@@ -206,7 +215,43 @@ router.beforeEach(async (to) => {
     }
 
     if (to.meta.guestOnly && authStore.isAuthenticated) {
-        return { name: 'dashboard' };
+        const { target, useLocation } = authStore.resolvePostLoginTarget(
+            typeof to.query.redirect === 'string' ? to.query.redirect : null,
+        );
+
+        if (useLocation) {
+            window.location.replace(target);
+            return false;
+        }
+
+        return { path: target, replace: true };
+    }
+
+    if (
+        authStore.isAuthenticated
+        && to.name === 'portal'
+        && authStore.shouldAutoLaunchHomeApp
+        && !hasPortalNotice
+    ) {
+        const { target, useLocation } = authStore.resolvePostLoginTarget();
+
+        if (useLocation) {
+            window.location.replace(target);
+            return false;
+        }
+
+        return { path: target, replace: true };
+    }
+
+    if (to.meta.requiresAuth && to.name !== 'portal' && !authStore.hasAppAccess('gesit')) {
+        const { target, useLocation } = authStore.resolvePostLoginTarget(to.fullPath);
+
+        if (useLocation) {
+            window.location.replace(target);
+            return false;
+        }
+
+        return { path: target, replace: true };
     }
 
     if (to.meta.requiresRole && !authStore.hasRole(to.meta.requiresRole)) {

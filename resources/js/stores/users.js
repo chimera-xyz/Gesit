@@ -5,6 +5,7 @@ export const useUserStore = defineStore('users', {
     state: () => ({
         users: [],
         roles: [],
+        appCatalog: [],
     }),
 
     getters: {
@@ -27,6 +28,7 @@ export const useUserStore = defineStore('users', {
                 const response = await axios.get('/api/users', { params });
                 this.users = response.data.users || [];
                 this.roles = response.data.roles || [];
+                this.appCatalog = response.data.app_catalog || [];
                 this.sortUsers();
                 return response.data;
             } catch (error) {
