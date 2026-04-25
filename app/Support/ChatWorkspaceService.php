@@ -10,6 +10,7 @@ use App\Models\ChatConversationUserState;
 use App\Models\ChatMessage;
 use App\Models\ChatMessageAttachment;
 use App\Models\ChatUserEvent;
+use App\Models\Notification;
 use App\Models\User;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
@@ -48,9 +49,14 @@ class ChatWorkspaceService
     ];
 
     private ?bool $sessionsTableAvailable = null;
+    private ?array $onlineUserIdsCache = null;
 
-    public function workspace(User $user): array
+    public function workspace(User $user, array $options = []): array
     {
+        $includeMessages = (bool) ($options['include_messages'] ?? true);
+        $includeDirectoryMembers = (bool) ($options['include_directory_members'] ?? true);
+        $messageConversationIds = $this->normalizeConversationIds($options['message_conversation_ids'] ?? null);
+
         $this->ensureWorkspaceProvisioned($user);
         $this->expireStaleCalls();
 
@@ -64,23 +70,39 @@ class ChatWorkspaceService
             ->with([
                 'participants.user.roles',
                 'states',
-                'messages' => fn ($query) => $query
-                    ->with(['sender.roles', 'attachment'])
-                    ->orderBy('created_at'),
+                'latestMessage' => fn ($query) => $query->with(['sender.roles', 'attachment']),
+                'messages' => function ($query) use ($includeMessages, $messageConversationIds) {
+                    if (! $includeMessages) {
+                        $query->whereRaw('1 = 0');
+
+                        return;
+                    }
+
+                    if ($messageConversationIds !== null) {
+                        $query->whereIn('conversation_id', $messageConversationIds);
+                    }
+
+                    $query
+                        ->with(['sender.roles', 'attachment'])
+                        ->orderBy('created_at');
+                },
             ])
             ->orderByDesc('last_message_at')
             ->orderByDesc('updated_at')
             ->get();
 
-        $directoryMembers = User::query()
-            ->where('is_active', true)
-            ->whereKeyNot($user->id)
-            ->with('roles')
-            ->orderBy('name')
-            ->get()
-            ->map(fn (User $member) => $this->serializeDirectoryMember($user, $member))
-            ->values()
-            ->all();
+        $directoryMembers = [];
+        if ($includeDirectoryMembers) {
+            $directoryMembers = User::query()
+                ->where('is_active', true)
+                ->whereKeyNot($user->id)
+                ->with('roles')
+                ->orderBy('name')
+                ->get()
+                ->map(fn (User $member) => $this->serializeDirectoryMember($user, $member))
+                ->values()
+                ->all();
+        }
 
         $activeCall = $this->activeCallForUser($user);
         $messagesByConversation = [];
@@ -88,6 +110,14 @@ class ChatWorkspaceService
         $assetsByConversation = [];
 
         foreach ($conversations as $conversation) {
+            if (! $includeMessages) {
+                continue;
+            }
+
+            if ($messageConversationIds !== null && ! in_array((int) $conversation->id, $messageConversationIds, true)) {
+                continue;
+            }
+
             $messagesByConversation[(string) $conversation->id] = $conversation->messages
                 ->map(fn (ChatMessage $message) => $this->serializeMessage($user, $conversation, $message))
                 ->values()
@@ -169,27 +199,22 @@ class ChatWorkspaceService
         }
 
         return DB::transaction(function () use ($actor, $conversation, $kind, $text, $clientToken, $metadata) {
-            $existingMessage = null;
-            if ($clientToken !== null && trim($clientToken) !== '') {
-                $existingMessage = ChatMessage::query()
-                    ->where('conversation_id', $conversation->id)
-                    ->where('sender_id', $actor->id)
-                    ->where('client_token', trim($clientToken))
-                    ->first();
-            }
-
-            $message = $existingMessage ?? ChatMessage::query()->create([
-                'conversation_id' => $conversation->id,
-                'sender_id' => $actor->id,
-                'client_token' => $clientToken ? trim($clientToken) : null,
-                'kind' => $kind,
-                'body' => $text !== null ? trim($text) : null,
-                'metadata' => $metadata,
-            ]);
+            [$message, $messageWasCreated] = $this->createOrReuseMessage(
+                $actor,
+                $conversation,
+                $kind,
+                $text,
+                $clientToken,
+                $metadata,
+            );
 
             $this->touchConversation($conversation, $message->created_at);
             $this->markConversationRead($actor, $conversation, $message);
             $this->emitConversationEvent($conversation, 'message.created', $message->id);
+
+            if ($messageWasCreated) {
+                $this->dispatchMessageNotifications($actor, $conversation, $message);
+            }
 
             return $message->fresh(['sender.roles', 'attachment']);
         });
@@ -207,7 +232,7 @@ class ChatWorkspaceService
         $this->assertConversationParticipant($conversation, $actor);
 
         return DB::transaction(function () use ($actor, $conversation, $attachment, $caption, $clientToken, $kind, $metadata) {
-            $message = $this->sendMessage(
+            [$message] = $this->createOrReuseMessage(
                 $actor,
                 $conversation,
                 $kind,
@@ -216,6 +241,7 @@ class ChatWorkspaceService
                 $metadata,
             );
 
+            $attachmentWasCreated = false;
             if ($message->attachment === null) {
                 $path = $attachment->store('chat-attachments', 'public');
 
@@ -227,9 +253,18 @@ class ChatWorkspaceService
                     'mime_type' => $attachment->getClientMimeType(),
                     'size_bytes' => $attachment->getSize(),
                 ]);
+
+                $attachmentWasCreated = true;
             }
 
+            $this->touchConversation($conversation, $message->created_at);
+            $this->markConversationRead($actor, $conversation, $message);
+            $this->emitConversationEvent($conversation, 'message.created', $message->id);
             $this->emitConversationEvent($conversation, 'message.attachment_created', $message->id);
+
+            if ($attachmentWasCreated) {
+                $this->dispatchMessageNotifications($actor, $conversation, $message->fresh(['sender.roles', 'attachment']));
+            }
 
             return $message->fresh(['sender.roles', 'attachment']);
         });
@@ -334,6 +369,7 @@ class ChatWorkspaceService
             }
 
             $this->emitConversationEvent($conversation, 'call.started', null, $call->id);
+            $this->dispatchIncomingCallNotifications($actor, $conversation, $call);
 
             return $call->fresh([
                 'conversation.participants.user.roles',
@@ -567,13 +603,163 @@ class ChatWorkspaceService
             });
     }
 
+    /**
+     * @return array{0: ChatMessage, 1: bool}
+     */
+    private function createOrReuseMessage(
+        User $actor,
+        ChatConversation $conversation,
+        string $kind,
+        ?string $text,
+        ?string $clientToken = null,
+        array $metadata = [],
+    ): array {
+        $existingMessage = null;
+        if ($clientToken !== null && trim($clientToken) !== '') {
+            $existingMessage = ChatMessage::query()
+                ->where('conversation_id', $conversation->id)
+                ->where('sender_id', $actor->id)
+                ->where('client_token', trim($clientToken))
+                ->first();
+        }
+
+        if ($existingMessage !== null) {
+            return [$existingMessage->loadMissing(['sender.roles', 'attachment']), false];
+        }
+
+        $message = ChatMessage::query()->create([
+            'conversation_id' => $conversation->id,
+            'sender_id' => $actor->id,
+            'client_token' => $clientToken ? trim($clientToken) : null,
+            'kind' => $kind,
+            'body' => $text !== null ? trim($text) : null,
+            'metadata' => $metadata,
+        ]);
+
+        return [$message->loadMissing(['sender.roles', 'attachment']), true];
+    }
+
+    private function dispatchMessageNotifications(
+        User $actor,
+        ChatConversation $conversation,
+        ChatMessage $message,
+    ): void {
+        $conversation->loadMissing([
+            'participants.user.roles',
+            'states',
+        ]);
+
+        foreach ($conversation->participants as $participant) {
+            $recipient = $participant->user;
+            if (
+                ! $participant->is_active
+                || $recipient === null
+                || ! $recipient->is_active
+                || (int) $recipient->id === (int) $actor->id
+            ) {
+                continue;
+            }
+
+            $state = $conversation->states
+                ->firstWhere('user_id', $recipient->id);
+            if ((bool) ($state?->is_muted ?? false)) {
+                continue;
+            }
+
+            $title = $conversation->type === 'group'
+                ? $this->conversationTitle($recipient, $conversation)
+                : trim((string) $actor->name);
+            $messagePreview = $this->messageNotificationPreview($message);
+            $body = $conversation->type === 'group'
+                ? trim((string) $actor->name).': '.$messagePreview
+                : $messagePreview;
+
+            Notification::query()->create([
+                'user_id' => $recipient->id,
+                'title' => $title !== '' ? $title : 'Chat baru',
+                'message' => $body,
+                'type' => 'general',
+                'link' => '/chat/conversations/'.$conversation->id,
+                'is_read' => false,
+            ]);
+        }
+    }
+
+    private function dispatchIncomingCallNotifications(
+        User $actor,
+        ChatConversation $conversation,
+        ChatCallSession $call,
+    ): void {
+        $conversation->loadMissing([
+            'participants.user.roles',
+        ]);
+
+        foreach ($conversation->participants as $participant) {
+            $recipient = $participant->user;
+            if (
+                ! $participant->is_active
+                || $recipient === null
+                || ! $recipient->is_active
+                || (int) $recipient->id === (int) $actor->id
+            ) {
+                continue;
+            }
+
+            $callLabel = $call->type === 'video' ? 'Video call' : 'Panggilan suara';
+            $groupSuffix = $conversation->type === 'group' ? ' grup' : '';
+
+            Notification::query()->create([
+                'user_id' => $recipient->id,
+                'title' => $conversation->type === 'group'
+                    ? $this->conversationTitle($recipient, $conversation)
+                    : trim((string) $actor->name).' menelepon',
+                'message' => $callLabel.$groupSuffix.' masuk dari '.trim((string) $actor->name).'.',
+                'type' => 'general',
+                'link' => '/chat/conversations/'.$conversation->id.'?call='.$call->id,
+                'is_read' => false,
+            ]);
+        }
+    }
+
+    private function messageNotificationPreview(ChatMessage $message): string
+    {
+        if ($message->kind === 'voice_note') {
+            return 'Mengirim voice note.';
+        }
+
+        if ($message->attachment !== null) {
+            return $this->attachmentNotificationPreview($message->attachment);
+        }
+
+        $body = trim((string) ($message->body ?? ''));
+
+        return $body !== '' ? $body : 'Pesan baru';
+    }
+
+    private function attachmentNotificationPreview(ChatMessageAttachment $attachment): string
+    {
+        if ($this->attachmentLooksLikePhoto($attachment)) {
+            return 'Mengirim photo.';
+        }
+
+        return 'Mengirim file.';
+    }
+
+    private function attachmentLooksLikePhoto(ChatMessageAttachment $attachment): bool
+    {
+        $mimeType = strtolower(trim((string) ($attachment->mime_type ?? '')));
+        if ($mimeType !== '' && str_starts_with($mimeType, 'image/')) {
+            return true;
+        }
+
+        $extension = strtolower((string) pathinfo((string) $attachment->original_name, PATHINFO_EXTENSION));
+
+        return in_array($extension, ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'heic', 'heif'], true);
+    }
+
     private function ensureWorkspaceProvisioned(User $user): void
     {
         $user->loadMissing('roles');
-        $activeUsers = User::query()
-            ->where('is_active', true)
-            ->with('roles')
-            ->get();
 
         foreach (self::DEFAULT_GROUPS as $definition) {
             $conversation = ChatConversation::query()->firstOrCreate(
@@ -588,17 +774,17 @@ class ChatWorkspaceService
                 ],
             );
 
-            foreach ($activeUsers as $activeUser) {
-                $this->ensureParticipant($conversation, $activeUser);
-                $this->ensureState($conversation, $activeUser);
-            }
+            $this->ensureParticipant($conversation, $user);
+            $this->ensureState($conversation, $user);
         }
     }
 
     private function serializeConversation(User $viewer, ChatConversation $conversation): array
     {
         $state = $this->stateForUser($conversation, $viewer);
-        $latestMessage = $conversation->messages->last();
+        $latestMessage = $conversation->relationLoaded('messages')
+            ? ($conversation->messages->last() ?? $conversation->latestMessage)
+            : $conversation->latestMessage;
         $updatedAt = $conversation->last_message_at ?? $conversation->updated_at;
         $title = $this->conversationTitle($viewer, $conversation);
         $subtitle = $this->conversationSubtitle($viewer, $conversation);
@@ -794,6 +980,21 @@ class ChatWorkspaceService
         ChatConversation $conversation,
         ?ChatConversationUserState $state,
     ): int {
+        if (! $conversation->relationLoaded('messages') || $conversation->messages->isEmpty()) {
+            return ChatMessage::query()
+                ->where('conversation_id', $conversation->id)
+                ->where(function ($query) use ($viewer) {
+                    $query
+                        ->whereNull('sender_id')
+                        ->orWhere('sender_id', '!=', $viewer->id);
+                })
+                ->when(
+                    $state?->last_read_at !== null,
+                    fn ($query) => $query->where('created_at', '>', $state->last_read_at),
+                )
+                ->count();
+        }
+
         return $conversation->messages
             ->filter(function (ChatMessage $message) use ($viewer, $state) {
                 if ((int) $message->sender_id === (int) $viewer->id) {
@@ -901,10 +1102,7 @@ class ChatWorkspaceService
             return true;
         }
 
-        return DB::table('sessions')
-            ->where('user_id', $user->id)
-            ->where('last_activity', '>=', now()->subMinutes(5)->timestamp)
-            ->exists();
+        return in_array((int) $user->id, $this->onlineUserIds(), true);
     }
 
     private function hasSessionsTable(): bool
@@ -916,6 +1114,46 @@ class ChatWorkspaceService
         $this->sessionsTableAvailable = Schema::hasTable('sessions');
 
         return $this->sessionsTableAvailable;
+    }
+
+    private function onlineUserIds(): array
+    {
+        if ($this->onlineUserIdsCache !== null) {
+            return $this->onlineUserIdsCache;
+        }
+
+        if (! $this->hasSessionsTable()) {
+            $this->onlineUserIdsCache = [];
+
+            return $this->onlineUserIdsCache;
+        }
+
+        $this->onlineUserIdsCache = DB::table('sessions')
+            ->whereNotNull('user_id')
+            ->where('last_activity', '>=', now()->subMinutes(5)->timestamp)
+            ->pluck('user_id')
+            ->map(fn ($userId) => (int) $userId)
+            ->unique()
+            ->values()
+            ->all();
+
+        return $this->onlineUserIdsCache;
+    }
+
+    private function normalizeConversationIds(mixed $value): ?array
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $ids = collect(is_array($value) ? $value : [$value])
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn (int $id) => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
+
+        return $ids === [] ? [] : $ids;
     }
 
     private function ensureParticipant(ChatConversation $conversation, User $user): ChatConversationParticipant

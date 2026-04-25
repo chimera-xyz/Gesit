@@ -39,7 +39,16 @@ class ChatController extends Controller
                 $this->chatWorkspaceService->expireStaleCalls();
 
                 if ($this->chatWorkspaceService->syncHasChanges($user, $afterEventId)) {
-                    return $this->workspaceResponse($user, 200, $afterEventId);
+                    $events = $this->chatWorkspaceService->eventsForUserSince($user, $afterEventId);
+
+                    return $this->workspaceResponse(
+                        $user,
+                        200,
+                        $afterEventId,
+                        $this->conversationIdsFromEvents($events),
+                        false,
+                        $events,
+                    );
                 }
 
                 if ($waitSeconds === 0) {
@@ -83,7 +92,14 @@ class ChatController extends Controller
                     $this->chatWorkspaceService->expireStaleCalls();
 
                     if ($this->chatWorkspaceService->syncHasChanges($user, $currentAfterEventId)) {
-                        $payload = $this->workspacePayload($user, $currentAfterEventId);
+                        $events = $this->chatWorkspaceService->eventsForUserSince($user, $currentAfterEventId);
+                        $payload = $this->workspacePayload(
+                            $user,
+                            $currentAfterEventId,
+                            $this->conversationIdsFromEvents($events),
+                            false,
+                            $events,
+                        );
                         $lastEventId = (int) ($payload['last_event_id'] ?? $currentAfterEventId);
 
                         $this->writeServerSentEvent('workspace', $payload, $lastEventId);
@@ -119,9 +135,15 @@ class ChatController extends Controller
             ]);
 
             $participant = User::query()->findOrFail($validated['participant_user_id']);
-            $this->chatWorkspaceService->ensureDirectConversation($request->user(), $participant);
+            $conversation = $this->chatWorkspaceService->ensureDirectConversation($request->user(), $participant);
 
-            return $this->workspaceResponse($request->user(), 201);
+            return $this->workspaceResponse(
+                $request->user(),
+                201,
+                null,
+                [$conversation->id ?? null],
+                false,
+            );
         });
     }
 
@@ -150,7 +172,13 @@ class ChatController extends Controller
                 $metadata,
             );
 
-            return $this->workspaceResponse($request->user(), 201);
+            return $this->workspaceResponse(
+                $request->user(),
+                201,
+                null,
+                [(int) $conversation->id],
+                false,
+            );
         });
     }
 
@@ -181,7 +209,13 @@ class ChatController extends Controller
                 $metadata,
             );
 
-            return $this->workspaceResponse($request->user(), 201);
+            return $this->workspaceResponse(
+                $request->user(),
+                201,
+                null,
+                [(int) $conversation->id],
+                false,
+            );
         });
     }
 
@@ -190,7 +224,13 @@ class ChatController extends Controller
         return $this->handleChatRequest(function () use ($request, $conversation) {
             $this->chatWorkspaceService->markConversationRead($request->user(), $conversation);
 
-            return $this->workspaceResponse($request->user());
+            return $this->workspaceResponse(
+                $request->user(),
+                200,
+                null,
+                [(int) $conversation->id],
+                false,
+            );
         });
     }
 
@@ -208,7 +248,13 @@ class ChatController extends Controller
                 $validated,
             );
 
-            return $this->workspaceResponse($request->user());
+            return $this->workspaceResponse(
+                $request->user(),
+                200,
+                null,
+                [(int) $conversation->id],
+                false,
+            );
         });
     }
 
@@ -225,7 +271,13 @@ class ChatController extends Controller
                 $validated['type'],
             );
 
-            return $this->workspaceResponse($request->user(), 201);
+            return $this->workspaceResponse(
+                $request->user(),
+                201,
+                null,
+                [(int) $conversation->id],
+                false,
+            );
         });
     }
 
@@ -234,7 +286,13 @@ class ChatController extends Controller
         return $this->handleChatRequest(function () use ($request, $call) {
             $this->chatWorkspaceService->acceptCall($request->user(), $call);
 
-            return $this->workspaceResponse($request->user());
+            return $this->workspaceResponse(
+                $request->user(),
+                200,
+                null,
+                [(int) $call->conversation_id],
+                false,
+            );
         });
     }
 
@@ -243,7 +301,13 @@ class ChatController extends Controller
         return $this->handleChatRequest(function () use ($request, $call) {
             $this->chatWorkspaceService->declineCall($request->user(), $call);
 
-            return $this->workspaceResponse($request->user());
+            return $this->workspaceResponse(
+                $request->user(),
+                200,
+                null,
+                [(int) $call->conversation_id],
+                false,
+            );
         });
     }
 
@@ -252,7 +316,13 @@ class ChatController extends Controller
         return $this->handleChatRequest(function () use ($request, $call) {
             $this->chatWorkspaceService->endCall($request->user(), $call);
 
-            return $this->workspaceResponse($request->user());
+            return $this->workspaceResponse(
+                $request->user(),
+                200,
+                null,
+                [(int) $call->conversation_id],
+                false,
+            );
         });
     }
 
@@ -271,21 +341,54 @@ class ChatController extends Controller
                 $validated['payload'] ?? [],
             );
 
-            return $this->workspaceResponse($request->user());
+            return $this->workspaceResponse(
+                $request->user(),
+                200,
+                null,
+                [(int) $call->conversation_id],
+                false,
+            );
         });
     }
 
-    private function workspaceResponse(User $user, int $status = 200, ?int $afterEventId = null)
+    private function workspaceResponse(
+        User $user,
+        int $status = 200,
+        ?int $afterEventId = null,
+        ?array $messageConversationIds = null,
+        bool $includeDirectoryMembers = true,
+        ?array $events = null,
+    )
     {
-        return response()->json($this->workspacePayload($user, $afterEventId), $status);
+        return response()->json(
+            $this->workspacePayload(
+                $user,
+                $afterEventId,
+                $messageConversationIds,
+                $includeDirectoryMembers,
+                $events,
+            ),
+            $status,
+        );
     }
 
-    private function workspacePayload(User $user, ?int $afterEventId = null): array
+    private function workspacePayload(
+        User $user,
+        ?int $afterEventId = null,
+        ?array $messageConversationIds = null,
+        bool $includeDirectoryMembers = true,
+        ?array $events = null,
+    ): array
     {
-        $workspace = $this->chatWorkspaceService->workspace($user);
-        $events = $afterEventId === null
+        $events = $events ?? ($afterEventId === null
             ? []
-            : $this->chatWorkspaceService->eventsForUserSince($user, $afterEventId);
+            : $this->chatWorkspaceService->eventsForUserSince($user, $afterEventId));
+
+        $workspace = $this->chatWorkspaceService->workspace($user, [
+            'include_directory_members' => $includeDirectoryMembers,
+            'include_messages' => $messageConversationIds === null || $messageConversationIds !== [],
+            'message_conversation_ids' => $messageConversationIds,
+        ]);
 
         return [
             'has_changes' => true,
@@ -293,6 +396,20 @@ class ChatController extends Controller
             'workspace' => $workspace,
             'events' => $events,
         ];
+    }
+
+    private function conversationIdsFromEvents(array $events): array
+    {
+        return collect($events)
+            ->map(function (array $event) {
+                $conversationId = $event['conversation_id'] ?? null;
+
+                return $conversationId === null ? null : (int) $conversationId;
+            })
+            ->filter(fn (?int $conversationId) => $conversationId !== null && $conversationId > 0)
+            ->unique()
+            ->values()
+            ->all();
     }
 
     private function writeServerSentEvent(string $event, array $payload, int $id): void

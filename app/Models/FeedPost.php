@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 
@@ -15,6 +16,7 @@ class FeedPost extends Model
     public const VISIBILITY_PUBLIC = 'public';
     public const VISIBILITY_DEPARTMENT = 'department';
     public const VISIBILITY_PRIVATE = 'private';
+    public const VISIBILITY_SELECTED_USERS = 'selected_users';
 
     /**
      * The attributes that are mass assignable.
@@ -62,6 +64,16 @@ class FeedPost extends Model
         return $this->morphMany(FeedLike::class, 'likeable');
     }
 
+    public function recipients(): BelongsToMany
+    {
+        return $this->belongsToMany(
+            User::class,
+            'feed_post_recipients',
+            'feed_post_id',
+            'user_id',
+        )->withTimestamps();
+    }
+
     public function scopeVisibleTo(Builder $query, User $user): Builder
     {
         return $query->where(function (Builder $visibleQuery) use ($user) {
@@ -77,6 +89,12 @@ class FeedPost extends Model
                         ->where('target_department', $department);
                 });
             }
+
+            $visibleQuery->orWhere(function (Builder $selectedUsersQuery) use ($user) {
+                $selectedUsersQuery
+                    ->where('visibility', self::VISIBILITY_SELECTED_USERS)
+                    ->whereHas('recipients', fn (Builder $recipientQuery) => $recipientQuery->where('users.id', $user->id));
+            });
         });
     }
 }

@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\User;
+use App\Models\Notification;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -165,6 +166,108 @@ class ChatWorkspaceTest extends TestCase
         $this->assertSame('laporan-final.pdf', $asset['label']);
         $this->assertSame('PDF', $asset['type_label']);
         Storage::disk('public')->assertExists('chat-attachments/'.$this->storedAttachmentName());
+    }
+
+    public function test_attachment_notifications_use_generic_media_labels(): void
+    {
+        Storage::fake('public');
+
+        $sender = $this->makeUserWithRole('Employee', [
+            'name' => 'Raihan Ops',
+            'email' => 'raihan.media.push@example.com',
+        ]);
+        $recipient = $this->makeUserWithRole('IT Staff', [
+            'name' => 'Budi IT',
+            'email' => 'budi.media.push@example.com',
+        ]);
+
+        $conversationId = $this->ensureDirectConversation($sender, $recipient);
+
+        $this->actingAs($sender)
+            ->postJson("/api/chat/conversations/{$conversationId}/attachments", [
+                'attachment' => UploadedFile::fake()->image('kamera-raw.jpg'),
+                'caption' => '',
+                'client_token' => 'media-notif-image-001',
+            ])
+            ->assertCreated();
+
+        $this->actingAs($sender)
+            ->postJson("/api/chat/conversations/{$conversationId}/attachments", [
+                'attachment' => UploadedFile::fake()->create(
+                    'kontrak-vendor.pdf',
+                    512,
+                    'application/pdf',
+                ),
+                'caption' => '',
+                'client_token' => 'media-notif-file-001',
+            ])
+            ->assertCreated();
+
+        $this->assertDatabaseHas('notifications', [
+            'user_id' => $recipient->id,
+            'title' => 'Raihan Ops',
+            'message' => 'Mengirim photo.',
+            'type' => 'general',
+            'link' => "/chat/conversations/{$conversationId}",
+        ]);
+        $this->assertDatabaseHas('notifications', [
+            'user_id' => $recipient->id,
+            'title' => 'Raihan Ops',
+            'message' => 'Mengirim file.',
+            'type' => 'general',
+            'link' => "/chat/conversations/{$conversationId}",
+        ]);
+    }
+
+    public function test_message_and_call_events_create_notifications_for_the_other_participant(): void
+    {
+        $sender = $this->makeUserWithRole('Employee', [
+            'name' => 'Raihan Ops',
+            'email' => 'raihan.push@example.com',
+        ]);
+        $recipient = $this->makeUserWithRole('IT Staff', [
+            'name' => 'Budi IT',
+            'email' => 'budi.push@example.com',
+        ]);
+
+        $conversationId = $this->ensureDirectConversation($sender, $recipient);
+
+        $this->actingAs($sender)
+            ->postJson("/api/chat/conversations/{$conversationId}/messages", [
+                'text' => 'Cek server produksi sekarang ya.',
+                'client_token' => 'push-msg-001',
+            ])
+            ->assertCreated();
+
+        $callResponse = $this->actingAs($sender)
+            ->postJson("/api/chat/conversations/{$conversationId}/calls", [
+                'type' => 'voice',
+            ])
+            ->assertCreated();
+
+        $callId = $callResponse->json('workspace.active_call.id');
+
+        $this->assertDatabaseHas('notifications', [
+            'user_id' => $recipient->id,
+            'title' => 'Raihan Ops',
+            'message' => 'Cek server produksi sekarang ya.',
+            'type' => 'general',
+            'link' => "/chat/conversations/{$conversationId}",
+        ]);
+        $this->assertDatabaseHas('notifications', [
+            'user_id' => $recipient->id,
+            'title' => 'Raihan Ops menelepon',
+            'message' => 'Panggilan suara masuk dari Raihan Ops.',
+            'type' => 'general',
+            'link' => "/chat/conversations/{$conversationId}?call={$callId}",
+        ]);
+        $this->assertSame(
+            2,
+            Notification::query()
+                ->where('user_id', $recipient->id)
+                ->where('link', 'like', "/chat/conversations/{$conversationId}%")
+                ->count(),
+        );
     }
 
     private function ensureDirectConversation(User $actor, User $participant): string

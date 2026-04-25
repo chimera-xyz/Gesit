@@ -17,6 +17,48 @@ use Illuminate\Validation\ValidationException;
 
 class FeedController extends Controller
 {
+    public function audienceMembers(Request $request)
+    {
+        try {
+            $validated = $request->validate([
+                'query' => ['nullable', 'string', 'max:100'],
+            ]);
+
+            /** @var User $user */
+            $user = $request->user()->loadMissing('roles');
+            $search = trim((string) ($validated['query'] ?? ''));
+
+            $members = User::query()
+                ->where('is_active', true)
+                ->whereKeyNot($user->id)
+                ->with('roles')
+                ->when($search !== '', function ($query) use ($search) {
+                    $query->where(function ($memberQuery) use ($search) {
+                        $memberQuery
+                            ->where('name', 'like', "%{$search}%")
+                            ->orWhere('department', 'like', "%{$search}%")
+                            ->orWhere('email', 'like', "%{$search}%");
+                    });
+                })
+                ->orderBy('name')
+                ->limit(300)
+                ->get();
+
+            return response()->json([
+                'users' => $members
+                    ->map(fn (User $member) => $this->transformAuthor($member))
+                    ->values()
+                    ->all(),
+            ]);
+        } catch (ValidationException|HttpResponseException $e) {
+            throw $e;
+        } catch (\Exception $e) {
+            Log::error('Feed Audience Members Error: '.$e->getMessage());
+
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
     public function index(Request $request)
     {
         try {
@@ -30,6 +72,7 @@ class FeedController extends Controller
 
             $posts = FeedPost::query()
                 ->visibleTo($user)
+                ->withCount('recipients')
                 ->with([
                     'author.roles',
                     'likes' => fn ($query) => $query->where('user_id', $user->id),
@@ -91,8 +134,11 @@ class FeedController extends Controller
                         FeedPost::VISIBILITY_PUBLIC,
                         FeedPost::VISIBILITY_DEPARTMENT,
                         FeedPost::VISIBILITY_PRIVATE,
+                        FeedPost::VISIBILITY_SELECTED_USERS,
                     ]),
                 ],
+                'recipient_user_ids' => ['nullable', 'array', 'max:100'],
+                'recipient_user_ids.*' => ['integer', Rule::exists('users', 'id')],
             ]);
 
             /** @var User $user */
@@ -100,6 +146,10 @@ class FeedController extends Controller
             $content = $this->trimmedText($validated['content']);
             $visibility = $validated['visibility'];
             $department = trim((string) ($user->department ?? ''));
+            $recipientUserIds = $this->normalizeRecipientUserIds(
+                $validated['recipient_user_ids'] ?? [],
+                $user,
+            );
 
             if ($visibility === FeedPost::VISIBILITY_DEPARTMENT && $department === '') {
                 throw new HttpResponseException(response()->json([
@@ -107,15 +157,29 @@ class FeedController extends Controller
                 ], 422));
             }
 
-            $post = DB::transaction(function () use ($user, $content, $visibility, $department) {
-                return FeedPost::query()->create([
+            if ($visibility === FeedPost::VISIBILITY_SELECTED_USERS && $recipientUserIds === []) {
+                throw new HttpResponseException(response()->json([
+                    'error' => 'Posting untuk user tertentu membutuhkan minimal satu penerima.',
+                ], 422));
+            }
+
+            $post = DB::transaction(function () use ($user, $content, $visibility, $department, $recipientUserIds) {
+                $post = FeedPost::query()->create([
                     'user_id' => $user->id,
                     'visibility' => $visibility,
                     'target_department' => $visibility === FeedPost::VISIBILITY_DEPARTMENT ? $department : null,
                     'content' => $content,
                     'last_activity_at' => now(),
                 ]);
+
+                if ($visibility === FeedPost::VISIBILITY_SELECTED_USERS) {
+                    $post->recipients()->sync($recipientUserIds);
+                }
+
+                return $post;
             });
+
+            $this->dispatchPostNotifications($post, $user);
 
             $createdPost = $this->loadPostSummaryForUser($user, (int) $post->id);
 
@@ -185,6 +249,8 @@ class FeedController extends Controller
             $validated = $request->validate([
                 'content' => ['required', 'string', 'max:1500'],
                 'parent_id' => ['nullable', 'integer', Rule::exists('feed_comments', 'id')],
+                'mentioned_user_ids' => ['nullable', 'array', 'max:50'],
+                'mentioned_user_ids.*' => ['integer', Rule::exists('users', 'id')],
             ]);
 
             /** @var User $user */
@@ -192,6 +258,12 @@ class FeedController extends Controller
             $this->ensureCanViewPost($user, $post);
 
             $content = $this->trimmedText($validated['content']);
+            $mentionedUserIds = $this->normalizeMentionedUserIds(
+                $post,
+                $content,
+                $user,
+                $validated['mentioned_user_ids'] ?? [],
+            );
             $replyTarget = null;
             $rootComment = null;
 
@@ -206,7 +278,7 @@ class FeedController extends Controller
                     : $replyTarget->parent;
             }
 
-            $comment = DB::transaction(function () use ($post, $user, $content, $replyTarget, $rootComment) {
+            $comment = DB::transaction(function () use ($post, $user, $content, $replyTarget, $rootComment, $mentionedUserIds) {
                 $comment = FeedComment::query()->create([
                     'post_id' => $post->id,
                     'user_id' => $user->id,
@@ -223,7 +295,7 @@ class FeedController extends Controller
                     $rootComment->increment('reply_count');
                 }
 
-                $this->dispatchCommentNotifications($post, $user, $replyTarget);
+                $this->dispatchCommentNotifications($post, $user, $replyTarget, $mentionedUserIds);
 
                 return $comment;
             });
@@ -329,6 +401,7 @@ class FeedController extends Controller
     {
         return FeedPost::query()
             ->visibleTo($user)
+            ->withCount('recipients')
             ->with([
                 'author.roles',
                 'likes' => fn ($query) => $query->where('user_id', $user->id),
@@ -340,8 +413,10 @@ class FeedController extends Controller
     {
         return FeedPost::query()
             ->visibleTo($user)
+            ->withCount('recipients')
             ->with([
                 'author.roles',
+                'recipients.roles',
                 'likes' => fn ($query) => $query->where('user_id', $user->id),
                 'rootComments' => fn ($query) => $query
                     ->orderBy('created_at')
@@ -399,6 +474,14 @@ class FeedController extends Controller
             'content' => $post->content,
             'visibility' => $post->visibility,
             'visibility_label' => $this->visibilityLabel($post),
+            'selected_recipient_count' => (int) ($post->recipients_count ?? 0),
+            'audience_user_ids' => $post->relationLoaded('recipients')
+                ? $post->recipients
+                    ->pluck('id')
+                    ->map(fn ($userId) => (string) $userId)
+                    ->values()
+                    ->all()
+                : [],
             'likes_count' => (int) $post->like_count,
             'comments_count' => (int) $post->comment_count,
             'liked_by_me' => $post->relationLoaded('likes') ? $post->likes->isNotEmpty() : false,
@@ -471,6 +554,9 @@ class FeedController extends Controller
             FeedPost::VISIBILITY_DEPARTMENT => trim((string) $post->target_department) !== ''
                 ? 'Divisi '.$post->target_department
                 : 'Satu divisi',
+            FeedPost::VISIBILITY_SELECTED_USERS => (int) ($post->recipients_count ?? 0) > 0
+                ? 'Orang tertentu ('.(int) $post->recipients_count.')'
+                : 'Orang tertentu',
             FeedPost::VISIBILITY_PRIVATE => 'Hanya saya',
             default => 'Semua orang',
         };
@@ -507,6 +593,13 @@ class FeedController extends Controller
             $post->visibility === FeedPost::VISIBILITY_DEPARTMENT
             && trim((string) ($user->department ?? '')) !== ''
             && trim((string) $post->target_department) === trim((string) $user->department)
+        ) {
+            return;
+        }
+
+        if (
+            $post->visibility === FeedPost::VISIBILITY_SELECTED_USERS
+            && $post->recipients()->where('users.id', $user->id)->exists()
         ) {
             return;
         }
@@ -570,47 +663,108 @@ class FeedController extends Controller
         return true;
     }
 
-    private function dispatchCommentNotifications(FeedPost $post, User $actor, ?FeedComment $parent): void
+    private function dispatchPostNotifications(FeedPost $post, User $actor): void
     {
         $link = '/feed/posts/'.$post->id;
         $actorName = trim((string) $actor->name);
 
-        if ($parent === null) {
-            if ((int) $post->user_id !== (int) $actor->id) {
-                $this->createNotification(
-                    (int) $post->user_id,
-                    'Komentar baru di feed',
-                    $actorName.' mengomentari update Anda.',
-                    $link,
-                );
+        foreach ($this->visibleAudienceUserIds($post) as $userId) {
+            if ((int) $userId === (int) $actor->id) {
+                continue;
             }
 
-            return;
-        }
-
-        if ((int) $parent->user_id !== (int) $actor->id) {
             $this->createNotification(
-                (int) $parent->user_id,
-                'Balasan komentar baru',
-                $actorName.' membalas komentar Anda.',
+                (int) $userId,
+                'Thread baru di feed',
+                $actorName.' membagikan thread baru untuk Anda.',
                 $link,
-            );
-        }
-
-        if (
-            (int) $post->user_id !== (int) $actor->id
-            && (int) $post->user_id !== (int) $parent->user_id
-        ) {
-            $this->createNotification(
-                (int) $post->user_id,
-                'Aktivitas baru di feed',
-                $actorName.' membalas thread Anda.',
-                $link,
+                'feed_thread',
             );
         }
     }
 
-    private function createNotification(int $userId, string $title, string $message, string $link): void
+    private function dispatchCommentNotifications(
+        FeedPost $post,
+        User $actor,
+        ?FeedComment $parent,
+        array $mentionedUserIds = [],
+    ): void
+    {
+        $link = '/feed/posts/'.$post->id;
+        $actorName = trim((string) $actor->name);
+        $visibleAudienceUserIds = collect($this->visibleAudienceUserIds($post))
+            ->map(fn ($userId) => (int) $userId)
+            ->values();
+        $notificationsByUserId = [];
+
+        foreach ($mentionedUserIds as $mentionedUserId) {
+            $resolvedUserId = (int) $mentionedUserId;
+            if (
+                $resolvedUserId <= 0
+                || $resolvedUserId === (int) $actor->id
+                || ! $visibleAudienceUserIds->contains($resolvedUserId)
+            ) {
+                continue;
+            }
+
+            $notificationsByUserId[$resolvedUserId] = [
+                'title' => 'Anda disebut di thread',
+                'message' => $actorName.' menyebut Anda di komentar thread.',
+                'type' => 'feed_mention',
+            ];
+        }
+
+        if ($parent === null) {
+            if ((int) $post->user_id !== (int) $actor->id) {
+                $notificationsByUserId[(int) $post->user_id] ??= [
+                    'title' => 'Komentar baru di feed',
+                    'message' => $actorName.' mengomentari update Anda.',
+                    'type' => 'feed_comment',
+                ];
+            }
+        } else {
+            if ((int) $parent->user_id !== (int) $actor->id) {
+                $notificationsByUserId[(int) $parent->user_id] ??= [
+                    'title' => 'Balasan komentar baru',
+                    'message' => $actorName.' membalas komentar Anda.',
+                    'type' => 'feed_comment',
+                ];
+            }
+
+            if (
+                (int) $post->user_id !== (int) $actor->id
+                && (int) $post->user_id !== (int) $parent->user_id
+            ) {
+                $notificationsByUserId[(int) $post->user_id] ??= [
+                    'title' => 'Aktivitas baru di feed',
+                    'message' => $actorName.' membalas thread Anda.',
+                    'type' => 'feed_comment',
+                ];
+            }
+        }
+
+        foreach ($notificationsByUserId as $userId => $payload) {
+            if (! $visibleAudienceUserIds->contains((int) $userId)) {
+                continue;
+            }
+
+            $this->createNotification(
+                (int) $userId,
+                $payload['title'],
+                $payload['message'],
+                $link,
+                $payload['type'],
+            );
+        }
+    }
+
+    private function createNotification(
+        int $userId,
+        string $title,
+        string $message,
+        string $link,
+        string $type = 'general',
+    ): void
     {
         Notification::query()->create([
             'user_id' => $userId,
@@ -620,5 +774,113 @@ class FeedController extends Controller
             'link' => $link,
             'is_read' => false,
         ]);
+    }
+
+    private function normalizeRecipientUserIds(array $rawUserIds, User $actor): array
+    {
+        $candidateUserIds = collect($rawUserIds)
+            ->map(fn ($userId) => (int) $userId)
+            ->filter(fn (int $userId) => $userId > 0 && $userId !== (int) $actor->id)
+            ->unique()
+            ->values();
+
+        if ($candidateUserIds->isEmpty()) {
+            return [];
+        }
+
+        return User::query()
+            ->where('is_active', true)
+            ->whereIn('id', $candidateUserIds->all())
+            ->pluck('id')
+            ->map(fn ($userId) => (int) $userId)
+            ->values()
+            ->all();
+    }
+
+    private function normalizeMentionedUserIds(
+        FeedPost $post,
+        string $content,
+        User $actor,
+        array $rawMentionedUserIds,
+    ): array {
+        $explicitMentionedUserIds = collect($rawMentionedUserIds)
+            ->map(fn ($userId) => (int) $userId)
+            ->filter(fn (int $userId) => $userId > 0 && $userId !== (int) $actor->id)
+            ->values();
+
+        $visibleAudienceUserIds = collect($this->visibleAudienceUserIds($post))
+            ->map(fn ($userId) => (int) $userId)
+            ->filter(fn (int $userId) => $userId !== (int) $actor->id)
+            ->values();
+
+        $parsedMentionedUserIds = [];
+        $mentionCandidates = User::query()
+            ->where('is_active', true)
+            ->whereIn('id', $visibleAudienceUserIds->all())
+            ->get(['id', 'name']);
+
+        $mentionCandidates = $mentionCandidates
+            ->sortByDesc(fn (User $candidate) => mb_strlen(trim((string) $candidate->name)))
+            ->values();
+
+        foreach ($mentionCandidates as $candidate) {
+            $candidateName = trim((string) $candidate->name);
+            if ($candidateName === '') {
+                continue;
+            }
+
+            if (mb_stripos($content, '@'.$candidateName) !== false) {
+                $parsedMentionedUserIds[] = (int) $candidate->id;
+            }
+        }
+
+        return $explicitMentionedUserIds
+            ->merge($parsedMentionedUserIds)
+            ->filter(fn (int $userId) => $visibleAudienceUserIds->contains($userId))
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    private function visibleAudienceUserIds(FeedPost $post): array
+    {
+        if ($post->visibility === FeedPost::VISIBILITY_PRIVATE) {
+            return [(int) $post->user_id];
+        }
+
+        if ($post->visibility === FeedPost::VISIBILITY_DEPARTMENT) {
+            $department = trim((string) $post->target_department);
+            if ($department === '') {
+                return [(int) $post->user_id];
+            }
+
+            return User::query()
+                ->where('is_active', true)
+                ->where('department', $department)
+                ->pluck('id')
+                ->map(fn ($userId) => (int) $userId)
+                ->unique()
+                ->values()
+                ->all();
+        }
+
+        if ($post->visibility === FeedPost::VISIBILITY_SELECTED_USERS) {
+            return $post->recipients()
+                ->where('users.is_active', true)
+                ->pluck('users.id')
+                ->map(fn ($userId) => (int) $userId)
+                ->push((int) $post->user_id)
+                ->unique()
+                ->values()
+                ->all();
+        }
+
+        return User::query()
+            ->where('is_active', true)
+            ->pluck('id')
+            ->map(fn ($userId) => (int) $userId)
+            ->unique()
+            ->values()
+            ->all();
     }
 }

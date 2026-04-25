@@ -84,6 +84,39 @@ class MobileAppReleaseTest extends TestCase
         $this->assertStringContainsString('/api/mobile-app/releases/'.$release->id.'/download', (string) $response->json('release.download_path'));
     }
 
+    public function test_download_endpoint_accepts_relative_signed_release_url(): void
+    {
+        Storage::fake('local');
+        Storage::disk('local')->put(
+            'mobile-app-releases/android/production/gesit-v15.apk',
+            'fake apk payload',
+        );
+
+        MobileAppRelease::query()->create([
+            'platform' => 'android',
+            'channel' => 'production',
+            'version_name' => '1.5.0',
+            'version_code' => 15,
+            'minimum_supported_version_code' => 15,
+            'release_notes' => 'Force update.',
+            'apk_path' => 'mobile-app-releases/android/production/gesit-v15.apk',
+            'apk_file_name' => 'gesit-v15.apk',
+            'apk_mime_type' => 'application/vnd.android.package-archive',
+            'file_size' => 16,
+            'sha256' => hash('sha256', 'fake apk payload'),
+            'is_published' => true,
+            'published_at' => now(),
+        ]);
+
+        $response = $this->getJson('/api/mobile-app/releases/latest?platform=android&channel=production&current_version_code=14');
+
+        $downloadPath = (string) $response->json('release.download_path');
+
+        $this->get($downloadPath)
+            ->assertOk()
+            ->assertHeader('content-type', 'application/vnd.android.package-archive');
+    }
+
     public function test_latest_endpoint_returns_optional_update_when_current_version_is_still_supported(): void
     {
         MobileAppRelease::query()->create([

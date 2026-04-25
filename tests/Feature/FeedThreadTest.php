@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\FeedPost;
+use App\Models\Notification;
 use App\Models\User;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -294,6 +295,114 @@ class FeedThreadTest extends TestCase
             'id' => $commentId,
             'reply_count' => 1,
         ]);
+    }
+
+    public function test_selected_user_visibility_only_surfaces_to_targeted_users_and_sends_new_thread_notification(): void
+    {
+        $author = $this->makeUserWithRole('Employee', [
+            'name' => 'Raihan Ops',
+            'email' => 'raihan.selected@example.com',
+            'department' => 'Operations',
+        ]);
+        $targetUser = $this->makeUserWithRole('Accounting', [
+            'name' => 'Dina Finance',
+            'email' => 'dina.selected@example.com',
+            'department' => 'Finance',
+        ]);
+        $otherUser = $this->makeUserWithRole('IT Staff', [
+            'name' => 'Budi IT',
+            'email' => 'budi.selected@example.com',
+            'department' => 'IT',
+        ]);
+
+        $response = $this->actingAs($author)
+            ->postJson('/api/feed/posts', [
+                'content' => 'Thread ini hanya untuk Dina.',
+                'visibility' => FeedPost::VISIBILITY_SELECTED_USERS,
+                'recipient_user_ids' => [$targetUser->id],
+            ])
+            ->assertCreated()
+            ->assertJsonPath('post.visibility', FeedPost::VISIBILITY_SELECTED_USERS)
+            ->assertJsonPath('post.selected_recipient_count', 1);
+
+        $postId = (int) $response->json('post.id');
+
+        $this->assertDatabaseHas('feed_post_recipients', [
+            'feed_post_id' => $postId,
+            'user_id' => $targetUser->id,
+        ]);
+        $this->assertDatabaseHas('notifications', [
+            'user_id' => $targetUser->id,
+            'title' => 'Thread baru di feed',
+            'link' => "/feed/posts/{$postId}",
+            'type' => 'general',
+        ]);
+        $this->assertDatabaseMissing('notifications', [
+            'user_id' => $otherUser->id,
+            'link' => "/feed/posts/{$postId}",
+        ]);
+
+        $this->actingAs($targetUser)
+            ->getJson('/api/feed')
+            ->assertOk()
+            ->assertJsonPath('posts.0.id', (string) $postId);
+
+        $this->actingAs($otherUser)
+            ->getJson('/api/feed')
+            ->assertOk()
+            ->assertJsonCount(0, 'posts');
+    }
+
+    public function test_comment_mention_notifies_post_owner_and_mentioned_user_without_duplicates(): void
+    {
+        $author = $this->makeUserWithRole('Employee', [
+            'name' => 'Raihan Ops',
+            'email' => 'raihan.mention@example.com',
+            'department' => 'Operations',
+        ]);
+        $commenter = $this->makeUserWithRole('IT Staff', [
+            'name' => 'Budi IT',
+            'email' => 'budi.mention@example.com',
+            'department' => 'IT',
+        ]);
+        $mentionedUser = $this->makeUserWithRole('Accounting', [
+            'name' => 'Dina Finance',
+            'email' => 'dina.mention@example.com',
+            'department' => 'Finance',
+        ]);
+
+        $post = FeedPost::query()->create([
+            'user_id' => $author->id,
+            'visibility' => FeedPost::VISIBILITY_PUBLIC,
+            'content' => 'Mohon follow up vendor minggu ini.',
+            'last_activity_at' => now(),
+        ]);
+
+        $this->actingAs($commenter)
+            ->postJson("/api/feed/posts/{$post->id}/comments", [
+                'content' => 'Siap, saya mention @Dina Finance buat cek invoice.',
+                'mentioned_user_ids' => [$mentionedUser->id],
+            ])
+            ->assertCreated();
+
+        $this->assertDatabaseHas('notifications', [
+            'user_id' => $author->id,
+            'title' => 'Komentar baru di feed',
+            'link' => "/feed/posts/{$post->id}",
+            'type' => 'general',
+        ]);
+        $this->assertDatabaseHas('notifications', [
+            'user_id' => $mentionedUser->id,
+            'title' => 'Anda disebut di thread',
+            'link' => "/feed/posts/{$post->id}",
+            'type' => 'general',
+        ]);
+        $this->assertSame(
+            2,
+            Notification::query()
+                ->where('link', "/feed/posts/{$post->id}")
+                ->count(),
+        );
     }
 
     private function makeUserWithRole(string $role, array $attributes = []): User

@@ -11,6 +11,12 @@ use Illuminate\Support\Facades\Log;
 
 class FcmPushService
 {
+    private const GENERAL_CHANNEL_ID = 'gesit.general.high_priority.v4';
+
+    private const CALL_CHANNEL_ID = 'gesit.calls.incoming.v4';
+
+    private const ANDROID_NOTIFICATION_SOUND = 'yulie_sekuritas_notifikasi_v2';
+
     public function dispatchNotification(Notification $notification): void
     {
         $credentials = $this->credentials();
@@ -41,79 +47,414 @@ class FcmPushService
         );
 
         foreach ($tokens as $token) {
-            try {
-                $response = Http::withToken($accessToken)
-                    ->acceptJson()
-                    ->connectTimeout(5)
-                    ->timeout(10)
-                    ->post($endpoint, [
-                        'message' => [
-                            'token' => $token,
-                            'notification' => [
-                                'title' => $notification->title,
-                                'body' => $notification->message,
-                            ],
-                            'data' => [
-                                'notification_id' => (string) $notification->id,
-                                'title' => $notification->title,
-                                'message' => $notification->message,
-                                'type' => $notification->type,
-                                'link' => (string) ($notification->link ?? ''),
-                                'created_at' => optional($notification->created_at)?->toISOString() ?? now()->toISOString(),
-                                'stores_in_center' => 'true',
-                            ],
-                            'android' => [
-                                'priority' => 'high',
-                                'notification' => [
-                                    'click_action' => 'FLUTTER_NOTIFICATION_CLICK',
-                                ],
-                            ],
-                            'apns' => [
-                                'headers' => [
-                                    'apns-priority' => '10',
-                                ],
-                                'payload' => [
-                                    'aps' => [
-                                        'sound' => 'default',
-                                    ],
-                                ],
-                            ],
-                        ],
-                    ]);
-            } catch (ConnectionException $exception) {
-                Log::warning('FCM push send failed because the endpoint could not be reached.', [
-                    'notification_id' => $notification->id,
-                    'token_suffix' => substr((string) $token, -12),
-                    'message' => $exception->getMessage(),
-                ]);
+            $data = $this->notificationData($notification);
+            $result = $this->dispatchTokenMessage(
+                endpoint: $endpoint,
+                accessToken: $accessToken,
+                token: (string) $token,
+                title: $notification->title,
+                body: $notification->message,
+                data: $data,
+                notificationId: (int) $notification->id,
+            );
 
-                return;
-            } catch (\Throwable $exception) {
-                Log::warning('FCM push send failed unexpectedly.', [
-                    'notification_id' => $notification->id,
-                    'token_suffix' => substr((string) $token, -12),
-                    'message' => $exception->getMessage(),
-                ]);
-
-                return;
+            if ($result['success']) {
+                continue;
             }
+        }
+    }
 
-            if ($response->successful()) {
+    /**
+     * @param  array<string, scalar|null>  $data
+     * @return array{
+     *     success: bool,
+     *     invalid_token: bool,
+     *     message_name: string|null,
+     *     status: int|null,
+     *     response_body: mixed
+     * }
+     */
+    public function dispatchDirectMessage(
+        string $token,
+        string $title,
+        string $body,
+        array $data = []
+    ): array {
+        $normalizedToken = trim($token);
+        if ($normalizedToken === '') {
+            return [
+                'success' => false,
+                'invalid_token' => false,
+                'message_name' => null,
+                'status' => null,
+                'response_body' => ['error' => 'FCM token is empty.'],
+            ];
+        }
+
+        $credentials = $this->credentials();
+        if ($credentials === null) {
+            return [
+                'success' => false,
+                'invalid_token' => false,
+                'message_name' => null,
+                'status' => null,
+                'response_body' => ['error' => 'FCM credentials are not configured.'],
+            ];
+        }
+
+        $accessToken = $this->accessToken($credentials);
+        if ($accessToken === null) {
+            return [
+                'success' => false,
+                'invalid_token' => false,
+                'message_name' => null,
+                'status' => null,
+                'response_body' => ['error' => 'FCM access token could not be generated.'],
+            ];
+        }
+
+        $endpoint = sprintf(
+            'https://fcm.googleapis.com/v1/projects/%s/messages:send',
+            $credentials['project_id']
+        );
+
+        return $this->dispatchTokenMessage(
+            endpoint: $endpoint,
+            accessToken: $accessToken,
+            token: $normalizedToken,
+            title: trim($title),
+            body: trim($body),
+            data: $this->normalizeDataPayload($data, $title, $body),
+            notificationId: null,
+        );
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function notificationData(Notification $notification): array
+    {
+        $category = $this->notificationCategory($notification);
+        $link = trim((string) ($notification->link ?? ''));
+        $data = [
+            'notification_id' => (string) $notification->id,
+            'id' => (string) $notification->id,
+            'title' => $notification->title,
+            'message' => $notification->message,
+            'type' => (string) $notification->type,
+            'link' => $link,
+            'created_at' => optional($notification->created_at)?->toISOString() ?? now()->toISOString(),
+            'stores_in_center' => 'true',
+            'notification_category' => $category,
+            'sound' => self::ANDROID_NOTIFICATION_SOUND,
+            'full_screen' => $category === 'call' ? 'true' : 'false',
+        ];
+
+        $conversationId = $this->conversationIdFromLink($link);
+        if ($conversationId !== null) {
+            $data['conversation_id'] = $conversationId;
+        }
+
+        $callId = $this->callIdFromLink($link);
+        if ($callId !== null) {
+            $data['call_id'] = $callId;
+        }
+
+        return $data;
+    }
+
+    private function notificationCategory(Notification $notification): string
+    {
+        $link = trim((string) ($notification->link ?? ''));
+
+        if ($link !== '' && str_contains($link, 'call=')) {
+            return 'call';
+        }
+
+        if ($link !== '' && str_contains($link, '/chat/conversations/')) {
+            return 'chat';
+        }
+
+        if ($link !== '' && str_contains($link, '/helpdesk')) {
+            return 'helpdesk';
+        }
+
+        if ($link !== '' && str_contains($link, '/feed/posts/')) {
+            return 'feed';
+        }
+
+        if ($link !== '' && str_contains($link, '/knowledge-hub')) {
+            return 'knowledge';
+        }
+
+        if ($link !== '' && (str_contains($link, '/submissions/') || str_contains($link, '/form-submissions/'))) {
+            return 'approval';
+        }
+
+        return 'general';
+    }
+
+    private function conversationIdFromLink(string $link): ?string
+    {
+        if ($link === '') {
+            return null;
+        }
+
+        if (! preg_match('~/chat/conversations/([^/?#]+)~', $link, $matches)) {
+            return null;
+        }
+
+        $conversationId = trim((string) ($matches[1] ?? ''));
+
+        return $conversationId !== '' ? $conversationId : null;
+    }
+
+    private function callIdFromLink(string $link): ?string
+    {
+        if ($link === '') {
+            return null;
+        }
+
+        $query = parse_url($link, PHP_URL_QUERY);
+        if (! is_string($query) || trim($query) === '') {
+            return null;
+        }
+
+        parse_str($query, $parameters);
+        $callId = trim((string) ($parameters['call'] ?? ''));
+
+        return $callId !== '' ? $callId : null;
+    }
+
+    /**
+     * @param  array<string, scalar|null>  $data
+     * @return array<string, string>
+     */
+    private function normalizeDataPayload(array $data, string $title, string $body): array
+    {
+        $normalized = [];
+
+        foreach ($data as $key => $value) {
+            $normalizedKey = trim((string) $key);
+            if ($normalizedKey === '') {
                 continue;
             }
 
-            if ($this->isInvalidTokenResponse($response->json())) {
-                NotificationDevice::query()->where('token', $token)->delete();
+            if (! is_scalar($value) && $value !== null) {
                 continue;
             }
 
-            Log::warning('FCM push send failed.', [
-                'notification_id' => $notification->id,
-                'token_suffix' => substr((string) $token, -12),
+            $normalized[$normalizedKey] = $value === null ? '' : trim((string) $value);
+        }
+
+        if (($normalized['title'] ?? '') === '') {
+            $normalized['title'] = trim($title);
+        }
+
+        if (($normalized['message'] ?? '') === '') {
+            $normalized['message'] = trim($body);
+        }
+
+        if (($normalized['notification_id'] ?? '') === '' && ($normalized['id'] ?? '') === '') {
+            $generatedId = 'debug-'.now()->format('Uu');
+            $normalized['notification_id'] = $generatedId;
+            $normalized['id'] = $generatedId;
+        } elseif (($normalized['notification_id'] ?? '') === '' && ($normalized['id'] ?? '') !== '') {
+            $normalized['notification_id'] = $normalized['id'];
+        } elseif (($normalized['id'] ?? '') === '' && ($normalized['notification_id'] ?? '') !== '') {
+            $normalized['id'] = $normalized['notification_id'];
+        }
+
+        if (($normalized['type'] ?? '') === '') {
+            $normalized['type'] = 'general';
+        }
+
+        if (($normalized['notification_category'] ?? '') === '' && ($normalized['category'] ?? '') === '') {
+            $normalized['notification_category'] = 'general';
+        }
+
+        if (($normalized['stores_in_center'] ?? '') === '') {
+            $normalized['stores_in_center'] = 'false';
+        }
+
+        if (($normalized['created_at'] ?? '') === '') {
+            $normalized['created_at'] = now()->toISOString();
+        }
+
+        if (($normalized['sound'] ?? '') === '') {
+            $normalized['sound'] = self::ANDROID_NOTIFICATION_SOUND;
+        }
+
+        if (($normalized['full_screen'] ?? '') === '') {
+            $normalized['full_screen'] = $this->isCallNotificationData($normalized)
+                ? 'true'
+                : 'false';
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * @param  array<string, string>  $data
+     * @return array{
+     *     success: bool,
+     *     invalid_token: bool,
+     *     message_name: string|null,
+     *     status: int|null,
+     *     response_body: mixed
+     * }
+     */
+    private function dispatchTokenMessage(
+        string $endpoint,
+        string $accessToken,
+        string $token,
+        string $title,
+        string $body,
+        array $data,
+        ?int $notificationId
+    ): array {
+        try {
+            $response = Http::withToken($accessToken)
+                ->acceptJson()
+                ->connectTimeout(5)
+                ->timeout(10)
+                ->post($endpoint, [
+                    'message' => $this->buildMessagePayload(
+                        token: $token,
+                        title: $title,
+                        body: $body,
+                        data: $data,
+                    ),
+                ]);
+        } catch (ConnectionException $exception) {
+            Log::warning('FCM push send failed because the endpoint could not be reached.', [
+                'notification_id' => $notificationId,
+                'token_suffix' => substr($token, -12),
+                'message' => $exception->getMessage(),
+            ]);
+
+            return [
+                'success' => false,
+                'invalid_token' => false,
+                'message_name' => null,
+                'status' => null,
+                'response_body' => ['error' => $exception->getMessage()],
+            ];
+        } catch (\Throwable $exception) {
+            Log::warning('FCM push send failed unexpectedly.', [
+                'notification_id' => $notificationId,
+                'token_suffix' => substr($token, -12),
+                'message' => $exception->getMessage(),
+            ]);
+
+            return [
+                'success' => false,
+                'invalid_token' => false,
+                'message_name' => null,
+                'status' => null,
+                'response_body' => ['error' => $exception->getMessage()],
+            ];
+        }
+
+        if ($response->successful()) {
+            return [
+                'success' => true,
+                'invalid_token' => false,
+                'message_name' => filled($response->json('name'))
+                    ? (string) $response->json('name')
+                    : null,
                 'status' => $response->status(),
-                'body' => $response->json(),
+                'response_body' => $response->json(),
+            ];
+        }
+
+        $responseBody = $response->json();
+        $invalidToken = $this->isInvalidTokenResponse($responseBody);
+
+        if ($invalidToken) {
+            NotificationDevice::query()->where('token', $token)->delete();
+        } else {
+            Log::warning('FCM push send failed.', [
+                'notification_id' => $notificationId,
+                'token_suffix' => substr($token, -12),
+                'status' => $response->status(),
+                'body' => $responseBody,
             ]);
         }
+
+        return [
+            'success' => false,
+            'invalid_token' => $invalidToken,
+            'message_name' => null,
+            'status' => $response->status(),
+            'response_body' => $responseBody,
+        ];
+    }
+
+    /**
+     * @param  array<string, string>  $data
+     * @return array<string, mixed>
+     */
+    private function buildMessagePayload(
+        string $token,
+        string $title,
+        string $body,
+        array $data
+    ): array {
+        $isCallNotification = $this->isCallNotificationData($data);
+        $channelId = $isCallNotification ? self::CALL_CHANNEL_ID : self::GENERAL_CHANNEL_ID;
+        $messageTag = trim((string) ($data['notification_id'] ?? $data['id'] ?? ''));
+
+        return [
+            'token' => $token,
+            'notification' => [
+                'title' => $title,
+                'body' => $body,
+            ],
+            'data' => $data,
+            'android' => [
+                'priority' => 'high',
+                'ttl' => $isCallNotification ? '25s' : '120s',
+                'notification' => array_filter([
+                    'channel_id' => $channelId,
+                    'click_action' => 'FLUTTER_NOTIFICATION_CLICK',
+                    'sound' => self::ANDROID_NOTIFICATION_SOUND,
+                    'tag' => $messageTag !== '' ? $messageTag : null,
+                ], fn ($value) => $value !== null),
+            ],
+            'apns' => [
+                'headers' => [
+                    'apns-priority' => '10',
+                    'apns-push-type' => 'alert',
+                ],
+                'payload' => [
+                    'aps' => [
+                        'alert' => [
+                            'title' => $title,
+                            'body' => $body,
+                        ],
+                        'sound' => 'default',
+                        'interruption-level' => $isCallNotification
+                            ? 'time-sensitive'
+                            : 'active',
+                    ],
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * @param  array<string, string>  $data
+     */
+    private function isCallNotificationData(array $data): bool
+    {
+        $category = trim((string) ($data['notification_category'] ?? $data['category'] ?? ''));
+        $type = trim((string) ($data['type'] ?? ''));
+        $link = trim((string) ($data['link'] ?? ''));
+
+        return $category === 'call'
+            || $type === 'chat_call'
+            || ($link !== '' && str_contains($link, 'call='));
     }
 
     /**

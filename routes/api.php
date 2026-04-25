@@ -28,7 +28,7 @@ Route::middleware('web')->group(function () {
     Route::get('/mobile-app/releases/latest', [MobileAppReleaseController::class, 'latest']);
     Route::get('/mobile-app/releases/{id}/download', [MobileAppReleaseController::class, 'download'])
         ->name('api.mobile-app.releases.download')
-        ->middleware('signed');
+        ->middleware('signed:relative');
 
     Route::post('/auth/biometric-login', [AuthController::class, 'biometricLogin']);
     Route::post('/auth/logout', [AuthController::class, 'logout'])
@@ -172,6 +172,7 @@ Route::middleware('web')->group(function () {
 
         // Feed Routes
         Route::get('/feed', [FeedController::class, 'index']);
+        Route::get('/feed/audience-members', [FeedController::class, 'audienceMembers']);
         Route::post('/feed/posts', [FeedController::class, 'store']);
         Route::get('/feed/posts/{post}', [FeedController::class, 'show']);
         Route::delete('/feed/posts/{post}', [FeedController::class, 'destroy']);

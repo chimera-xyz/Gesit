@@ -353,11 +353,15 @@ class MobileAppReleaseController extends Controller
                 abort(404);
             }
 
+            @set_time_limit(0);
+            @ini_set('max_execution_time', '0');
+
             return response()->download(
                 Storage::disk('local')->path($release->apk_path),
                 $release->apk_file_name,
                 [
                     'Content-Type' => $release->apk_mime_type ?: 'application/vnd.android.package-archive',
+                    'X-Accel-Buffering' => 'no',
                 ]
             );
         } catch (ValidationException|HttpResponseException $e) {
