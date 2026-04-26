@@ -49,6 +49,7 @@ class ChatWorkspaceService
     ];
 
     private ?bool $sessionsTableAvailable = null;
+
     private ?array $onlineUserIdsCache = null;
 
     public function workspace(User $user, array $options = []): array
@@ -516,10 +517,19 @@ class ChatWorkspaceService
                 $mediaStateByUser = is_array($metadata['media_state_by_user'] ?? null)
                     ? $metadata['media_state_by_user']
                     : [];
+                $previousMediaState = is_array($mediaStateByUser[(string) $actor->id] ?? null)
+                    ? $mediaStateByUser[(string) $actor->id]
+                    : [];
                 $mediaStateByUser[(string) $actor->id] = [
-                    'mic_enabled' => (bool) ($payload['mic_enabled'] ?? true),
-                    'camera_enabled' => (bool) ($payload['camera_enabled'] ?? false),
-                    'speaker_enabled' => (bool) ($payload['speaker_enabled'] ?? true),
+                    'mic_enabled' => array_key_exists('mic_enabled', $payload)
+                        ? (bool) $payload['mic_enabled']
+                        : (bool) ($previousMediaState['mic_enabled'] ?? true),
+                    'camera_enabled' => array_key_exists('camera_enabled', $payload)
+                        ? (bool) $payload['camera_enabled']
+                        : (bool) ($previousMediaState['camera_enabled'] ?? ($call->type === 'video')),
+                    'speaker_enabled' => array_key_exists('speaker_enabled', $payload)
+                        ? (bool) $payload['speaker_enabled']
+                        : (bool) ($previousMediaState['speaker_enabled'] ?? true),
                     'ready' => $type === 'ready' || (bool) ($payload['ready'] ?? false),
                     'updated_at' => now()->toISOString(),
                 ];

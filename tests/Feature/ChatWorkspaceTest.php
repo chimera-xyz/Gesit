@@ -2,8 +2,8 @@
 
 namespace Tests\Feature;
 
-use App\Models\User;
 use App\Models\Notification;
+use App\Models\User;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -125,6 +125,58 @@ class ChatWorkspaceTest extends TestCase
         $this->assertNotNull($lastMessage);
         $this->assertTrue($lastMessage['is_system']);
         $this->assertStringContainsString('Panggilan suara selesai', $lastMessage['text']);
+    }
+
+    public function test_ready_signal_preserves_existing_video_media_state(): void
+    {
+        $caller = $this->makeUserWithRole('Employee', [
+            'name' => 'Raihan Ops',
+            'email' => 'raihan.video-ready@example.com',
+        ]);
+        $callee = $this->makeUserWithRole('Accounting', [
+            'name' => 'Dina Accounting',
+            'email' => 'dina.video-ready@example.com',
+        ]);
+
+        $conversationId = $this->ensureDirectConversation($caller, $callee);
+
+        $callResponse = $this->actingAs($caller)
+            ->postJson("/api/chat/conversations/{$conversationId}/calls", [
+                'type' => 'video',
+            ])
+            ->assertCreated();
+
+        $callId = $callResponse->json('workspace.active_call.id');
+
+        $this->actingAs($caller)
+            ->postJson("/api/chat/calls/{$callId}/signal", [
+                'type' => 'media_state',
+                'payload' => [
+                    'mic_enabled' => true,
+                    'camera_enabled' => true,
+                    'speaker_enabled' => true,
+                ],
+            ])
+            ->assertOk();
+
+        $this->actingAs($caller)
+            ->postJson("/api/chat/calls/{$callId}/signal", [
+                'type' => 'ready',
+                'payload' => [
+                    'ready' => true,
+                ],
+            ])
+            ->assertOk();
+
+        $calleeWorkspace = $this->actingAs($callee)
+            ->getJson('/api/chat/workspace')
+            ->assertOk();
+
+        $callerParticipant = collect($calleeWorkspace->json('workspace.active_call.participants'))
+            ->firstWhere('id', (string) $caller->id);
+
+        $this->assertNotNull($callerParticipant);
+        $this->assertTrue($callerParticipant['is_video_enabled']);
     }
 
     public function test_attachment_message_appears_in_recipient_assets(): void
