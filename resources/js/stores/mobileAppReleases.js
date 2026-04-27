@@ -8,6 +8,7 @@ export const useMobileAppReleaseStore = defineStore('mobile-app-releases', {
             platforms: ['android'],
             channels: ['production'],
             latest_published_version_code: null,
+            latest_published_version_name: null,
             next_version_code_suggestion: 1,
             minimum_supported_version_code_suggestion: 1,
         },

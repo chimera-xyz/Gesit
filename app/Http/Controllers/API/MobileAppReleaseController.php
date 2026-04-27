@@ -4,6 +4,7 @@ namespace App\Http\Controllers\API;
 
 use App\Http\Controllers\Controller;
 use App\Models\MobileAppRelease;
+use App\Support\AndroidApkMetadataReader;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
@@ -44,6 +45,7 @@ class MobileAppReleaseController extends Controller
                     'platforms' => self::SUPPORTED_PLATFORMS,
                     'channels' => ['production'],
                     'latest_published_version_code' => $latestPublished?->version_code,
+                    'latest_published_version_name' => $latestPublished?->version_name,
                     'next_version_code_suggestion' => ((int) ($highestVersionCode ?? 0)) + 1,
                     'minimum_supported_version_code_suggestion' => (int) ($latestPublished?->version_code ?? 1),
                 ],
@@ -88,6 +90,7 @@ class MobileAppReleaseController extends Controller
                     'version_name' => $validated['version_name'],
                     'version_code' => (int) $validated['version_code'],
                     'minimum_supported_version_code' => (int) $validated['minimum_supported_version_code'],
+                    'is_force_update' => (bool) ($validated['force_update'] ?? false),
                     'release_notes' => $this->nullableTrim($validated['release_notes'] ?? null),
                     'apk_path' => $filePayload['apk_path'],
                     'apk_file_name' => $filePayload['apk_file_name'],
@@ -160,6 +163,7 @@ class MobileAppReleaseController extends Controller
                     'version_name' => $validated['version_name'],
                     'version_code' => (int) $validated['version_code'],
                     'minimum_supported_version_code' => (int) $validated['minimum_supported_version_code'],
+                    'is_force_update' => (bool) ($validated['force_update'] ?? false),
                     'release_notes' => $this->nullableTrim($validated['release_notes'] ?? null),
                     'is_published' => $publishNow,
                     'published_at' => $publishedAt,
@@ -319,9 +323,7 @@ class MobileAppReleaseController extends Controller
 
             $status = 'up_to_date';
             if ($currentVersionCode < $release->version_code) {
-                $status = $currentVersionCode < $release->minimum_supported_version_code
-                    ? 'force_update'
-                    : 'optional_update';
+                $status = $release->is_force_update ? 'force_update' : 'optional_update';
             }
 
             return response()->json([
@@ -382,6 +384,41 @@ class MobileAppReleaseController extends Controller
         $platform = $this->normalizePlatform($request->input('platform', $existing?->platform ?? 'android'));
         $channel = $this->normalizeChannel($request->input('channel', $existing?->channel ?? 'production'));
         $currentReleaseId = $existing?->id;
+        $file = $request->file('apk_file');
+        $apkMetadata = $file instanceof UploadedFile
+            ? (new AndroidApkMetadataReader())->read($file->getPathname())
+            : [];
+        $forceUpdate = $request->has('force_update')
+            ? $request->boolean('force_update')
+            : (bool) ($existing?->is_force_update ?? false);
+        $metadataVersionCode = (int) ($apkMetadata['version_code'] ?? 0);
+        $metadataVersionName = $this->nullableTrim($apkMetadata['version_name'] ?? null);
+
+        $request->merge([
+            'platform' => $platform,
+            'channel' => $channel,
+            'force_update' => $forceUpdate,
+        ]);
+
+        if ($metadataVersionCode > 0) {
+            $request->merge(['version_code' => $metadataVersionCode]);
+        }
+
+        if ($metadataVersionName !== null) {
+            $request->merge(['version_name' => $metadataVersionName]);
+        }
+
+        $resolvedVersionCode = (int) ($request->input('version_code') ?: $existing?->version_code ?: 0);
+        if ($forceUpdate && $resolvedVersionCode > 0) {
+            $request->merge(['minimum_supported_version_code' => $resolvedVersionCode]);
+        } elseif (! $request->filled('minimum_supported_version_code')) {
+            $suggestedMinimum = $this->minimumSupportedVersionCodeSuggestion(
+                platform: $platform,
+                channel: $channel,
+                versionCode: $resolvedVersionCode,
+            );
+            $request->merge(['minimum_supported_version_code' => $suggestedMinimum]);
+        }
 
         $rules = [
             'platform' => ['required', 'string'],
@@ -405,6 +442,7 @@ class MobileAppReleaseController extends Controller
                 },
             ],
             'minimum_supported_version_code' => ['required', 'integer', 'min:1', 'lte:version_code'],
+            'force_update' => ['sometimes', 'boolean'],
             'release_notes' => ['nullable', 'string', 'max:5000'],
             'publish_now' => ['sometimes', 'boolean'],
             'apk_file' => [
@@ -419,6 +457,7 @@ class MobileAppReleaseController extends Controller
         $validated = $request->validate($rules);
         $validated['platform'] = $platform;
         $validated['channel'] = $channel;
+        $validated['force_update'] = $forceUpdate;
 
         if (! in_array($platform, self::SUPPORTED_PLATFORMS, true)) {
             throw new HttpResponseException(response()->json([
@@ -427,6 +466,24 @@ class MobileAppReleaseController extends Controller
         }
 
         return $validated;
+    }
+
+    private function minimumSupportedVersionCodeSuggestion(
+        string $platform,
+        string $channel,
+        int $versionCode,
+    ): int {
+        $latestPublishedVersionCode = (int) (MobileAppRelease::query()
+            ->published()
+            ->where('platform', $platform)
+            ->where('channel', $channel)
+            ->max('version_code') ?? 1);
+
+        if ($versionCode <= 0) {
+            return max(1, $latestPublishedVersionCode);
+        }
+
+        return max(1, min($latestPublishedVersionCode, $versionCode));
     }
 
     /**
@@ -459,12 +516,38 @@ class MobileAppReleaseController extends Controller
         );
 
         $directory = sprintf('mobile-app-releases/%s/%s', $platform, $channel);
-        $storedPath = $file->storeAs($directory, $storedName, 'local');
-        if (! is_string($storedPath) || $storedPath === '') {
+        $storedPath = $directory.'/'.$storedName;
+        $sourcePath = $this->readableUploadedFilePath($file);
+        $sourceStream = $sourcePath !== null ? @fopen($sourcePath, 'rb') : false;
+        $testingTempStream = null;
+        $uploadedContents = null;
+
+        try {
+            if (is_resource($sourceStream)) {
+                $stored = Storage::disk('local')->put($storedPath, $sourceStream);
+            } else {
+                $testingTempStream = $this->testingUploadedFileTempStream($file);
+
+                if (is_resource($testingTempStream)) {
+                    rewind($testingTempStream);
+                    $stored = Storage::disk('local')->put($storedPath, $testingTempStream);
+                    rewind($testingTempStream);
+                } else {
+                    $uploadedContents = $this->uploadedFileContents($file);
+                    $stored = Storage::disk('local')->put($storedPath, $uploadedContents);
+                }
+            }
+        } finally {
+            if (is_resource($sourceStream)) {
+                fclose($sourceStream);
+            }
+        }
+
+        if (! $stored) {
             throw new \RuntimeException('File APK gagal disimpan.');
         }
 
-        $sha256 = hash_file('sha256', $file->getRealPath());
+        $sha256 = $this->uploadedFileSha256($sourcePath, $testingTempStream, $uploadedContents);
         if (! is_string($sha256) || $sha256 === '') {
             Storage::disk('local')->delete($storedPath);
             throw new \RuntimeException('Checksum APK gagal dihitung.');
@@ -479,6 +562,63 @@ class MobileAppReleaseController extends Controller
         ];
     }
 
+    private function readableUploadedFilePath(UploadedFile $file): ?string
+    {
+        $path = $file->getPathname();
+        if (is_string($path) && $path !== '' && is_file($path) && is_readable($path)) {
+            return $path;
+        }
+
+        return null;
+    }
+
+    /**
+     * @return resource|null
+     */
+    private function testingUploadedFileTempStream(UploadedFile $file): mixed
+    {
+        if (! property_exists($file, 'tempFile')) {
+            return null;
+        }
+
+        $stream = $file->tempFile;
+
+        return is_resource($stream) ? $stream : null;
+    }
+
+    private function uploadedFileContents(UploadedFile $file): string
+    {
+        $contents = $file->get();
+        if (! is_string($contents)) {
+            throw new \RuntimeException('File APK gagal dibaca.');
+        }
+
+        return $contents;
+    }
+
+    /**
+     * @param resource|null $testingTempStream
+     */
+    private function uploadedFileSha256(?string $sourcePath, mixed $testingTempStream, ?string $uploadedContents): string
+    {
+        if ($sourcePath !== null) {
+            $sha256 = hash_file('sha256', $sourcePath);
+
+            return is_string($sha256) ? $sha256 : '';
+        }
+
+        if (is_resource($testingTempStream)) {
+            rewind($testingTempStream);
+            $context = hash_init('sha256');
+            hash_update_stream($context, $testingTempStream);
+            rewind($testingTempStream);
+
+            return hash_final($context);
+        }
+
+        return hash('sha256', $uploadedContents ?? '');
+    }
+
     private function transformRelease(MobileAppRelease $release): array
     {
         $release->loadMissing('uploadedBy:id,name,email');
@@ -490,13 +630,14 @@ class MobileAppReleaseController extends Controller
             'version_name' => $release->version_name,
             'version_code' => (int) $release->version_code,
             'minimum_supported_version_code' => (int) $release->minimum_supported_version_code,
+            'is_force_update' => (bool) $release->is_force_update,
             'release_notes' => $release->release_notes,
             'apk_file_name' => $release->apk_file_name,
             'apk_mime_type' => $release->apk_mime_type,
             'file_size' => (int) $release->file_size,
             'sha256' => $release->sha256,
             'is_published' => (bool) $release->is_published,
-            'update_mode' => $release->minimum_supported_version_code >= $release->version_code ? 'force' : 'optional',
+            'update_mode' => $release->is_force_update ? 'force' : 'optional',
             'published_at' => optional($release->published_at)?->toISOString(),
             'created_at' => optional($release->created_at)?->toISOString(),
             'updated_at' => optional($release->updated_at)?->toISOString(),
@@ -526,6 +667,8 @@ class MobileAppReleaseController extends Controller
             'version_name' => $release->version_name,
             'version_code' => (int) $release->version_code,
             'minimum_supported_version_code' => (int) $release->minimum_supported_version_code,
+            'is_force_update' => (bool) $release->is_force_update,
+            'update_mode' => $release->is_force_update ? 'force' : 'optional',
             'release_notes' => $release->release_notes,
             'apk_file_name' => $release->apk_file_name,
             'file_size' => (int) $release->file_size,

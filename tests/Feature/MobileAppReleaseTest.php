@@ -26,6 +26,7 @@ class MobileAppReleaseTest extends TestCase
             'version_name' => '1.4.0',
             'version_code' => 14,
             'minimum_supported_version_code' => 14,
+            'force_update' => '1',
             'release_notes' => 'Force update keamanan.',
             'publish_now' => '1',
             'apk_file' => UploadedFile::fake()->create(
@@ -46,6 +47,7 @@ class MobileAppReleaseTest extends TestCase
         $this->assertSame('production', $release->channel);
         $this->assertSame(14, $release->version_code);
         $this->assertSame(14, $release->minimum_supported_version_code);
+        $this->assertTrue($release->is_force_update);
         $this->assertTrue($release->is_published);
         $this->assertNotNull($release->published_at);
         $this->assertDatabaseHas('mobile_app_releases', [
@@ -63,6 +65,7 @@ class MobileAppReleaseTest extends TestCase
             'version_name' => '1.5.0',
             'version_code' => 15,
             'minimum_supported_version_code' => 15,
+            'is_force_update' => true,
             'release_notes' => 'Force update.',
             'apk_path' => 'mobile-app-releases/android/production/gesit-v15.apk',
             'apk_file_name' => 'gesit-v15.apk',
@@ -98,6 +101,7 @@ class MobileAppReleaseTest extends TestCase
             'version_name' => '1.5.0',
             'version_code' => 15,
             'minimum_supported_version_code' => 15,
+            'is_force_update' => true,
             'release_notes' => 'Force update.',
             'apk_path' => 'mobile-app-releases/android/production/gesit-v15.apk',
             'apk_file_name' => 'gesit-v15.apk',
@@ -125,6 +129,7 @@ class MobileAppReleaseTest extends TestCase
             'version_name' => '1.6.0',
             'version_code' => 16,
             'minimum_supported_version_code' => 15,
+            'is_force_update' => false,
             'release_notes' => 'Update opsional.',
             'apk_path' => 'mobile-app-releases/android/production/gesit-v16.apk',
             'apk_file_name' => 'gesit-v16.apk',
@@ -150,6 +155,7 @@ class MobileAppReleaseTest extends TestCase
             'version_name' => '1.7.0',
             'version_code' => 17,
             'minimum_supported_version_code' => 16,
+            'is_force_update' => false,
             'release_notes' => 'Patch terbaru.',
             'apk_path' => 'mobile-app-releases/android/production/gesit-v17.apk',
             'apk_file_name' => 'gesit-v17.apk',
@@ -164,6 +170,32 @@ class MobileAppReleaseTest extends TestCase
             ->assertOk()
             ->assertJsonPath('status', 'up_to_date')
             ->assertJsonPath('release.version_code', 17);
+    }
+
+    public function test_latest_endpoint_returns_optional_update_when_force_update_is_disabled(): void
+    {
+        MobileAppRelease::query()->create([
+            'platform' => 'android',
+            'channel' => 'production',
+            'version_name' => '1.8.0',
+            'version_code' => 18,
+            'minimum_supported_version_code' => 18,
+            'is_force_update' => false,
+            'release_notes' => 'Update opsional.',
+            'apk_path' => 'mobile-app-releases/android/production/gesit-v18.apk',
+            'apk_file_name' => 'gesit-v18.apk',
+            'apk_mime_type' => 'application/vnd.android.package-archive',
+            'file_size' => 423456,
+            'sha256' => str_repeat('d', 64),
+            'is_published' => true,
+            'published_at' => now(),
+        ]);
+
+        $this->getJson('/api/mobile-app/releases/latest?platform=android&channel=production&current_version_code=17')
+            ->assertOk()
+            ->assertJsonPath('status', 'optional_update')
+            ->assertJsonPath('release.is_force_update', false)
+            ->assertJsonPath('release.update_mode', 'optional');
     }
 
     private function makeAdminUser(): User

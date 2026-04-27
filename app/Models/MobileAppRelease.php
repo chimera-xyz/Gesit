@@ -17,6 +17,7 @@ class MobileAppRelease extends Model
         'version_name',
         'version_code',
         'minimum_supported_version_code',
+        'is_force_update',
         'release_notes',
         'apk_path',
         'apk_file_name',
@@ -33,6 +34,7 @@ class MobileAppRelease extends Model
         return [
             'version_code' => 'integer',
             'minimum_supported_version_code' => 'integer',
+            'is_force_update' => 'boolean',
             'file_size' => 'integer',
             'is_published' => 'boolean',
             'published_at' => 'datetime',
