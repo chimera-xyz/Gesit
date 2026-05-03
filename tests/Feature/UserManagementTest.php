@@ -5,7 +5,9 @@ namespace Tests\Feature;
 use App\Models\User;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class UserManagementTest extends TestCase
@@ -146,6 +148,37 @@ class UserManagementTest extends TestCase
             ->getJson('/api/user')
             ->assertStatus(403)
             ->assertJsonPath('error', 'Account disabled');
+    }
+
+    public function test_user_can_update_profile_bio_and_photo(): void
+    {
+        Storage::fake('public');
+
+        $user = $this->makeUserWithRole('IT Staff', [
+            'name' => 'GESIT IT Staff',
+            'email' => 'it.staff@gesit.local',
+            'department' => 'IT',
+            'employee_id' => 'EMP-021',
+            's21plus_user_id' => 's21-itstaff',
+        ]);
+
+        $response = $this->actingAs($user)->post('/api/user/profile', [
+            'bio' => '  Supporting internal operations with secure systems.  ',
+            'profile_photo' => UploadedFile::fake()->image('profile.jpg', 640, 640),
+        ]);
+
+        $response
+            ->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('user.bio', 'Supporting internal operations with secure systems.')
+            ->assertJsonPath('user.s21plus_user_id', 's21-itstaff');
+
+        $user->refresh();
+
+        $this->assertSame('Supporting internal operations with secure systems.', $user->bio);
+        $this->assertNotNull($user->profile_photo_path);
+        $this->assertNotNull($response->json('user.profile_photo_url'));
+        Storage::disk('public')->assertExists($user->profile_photo_path);
     }
 
     private function makeUserWithRole(string $role, array $attributes = []): User

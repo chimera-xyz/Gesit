@@ -49,8 +49,11 @@
               class="flex items-center gap-3 rounded-2xl border border-[#efe5d7] bg-white px-3 py-2 text-left shadow-sm transition-all duration-200 hover:border-[#d8bc84] focus:outline-none focus:ring-4 focus:ring-[#f3e4bf]"
               type="button"
             >
-              <div class="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#9b6b17] text-sm font-semibold text-white shadow-lg shadow-[#ead39a]/70">
-                {{ userInitials }}
+              <div class="h-10 w-10 overflow-hidden rounded-2xl bg-[#9b6b17] text-sm font-semibold text-white shadow-lg shadow-[#ead39a]/70">
+                <img v-if="userProfilePhotoUrl" :src="userProfilePhotoUrl" alt="" class="h-full w-full object-cover">
+                <div v-else class="flex h-full w-full items-center justify-center">
+                  {{ userInitials }}
+                </div>
               </div>
               <div class="hidden sm:block">
                 <p class="max-w-40 truncate text-sm font-semibold text-secondary-900">{{ authStore.user?.name || 'User' }}</p>
@@ -409,6 +412,8 @@ const userInitials = computed(() => {
     .map((part) => part[0]?.toUpperCase())
     .join('');
 });
+
+const userProfilePhotoUrl = computed(() => authStore.user?.profile_photo_url || '');
 
 const unreadCount = computed(() => notificationStore.unreadCount);
 

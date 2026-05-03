@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Support\Facades\Storage;
 use Spatie\Permission\Traits\HasRoles;
 
 class User extends Authenticatable
@@ -28,6 +29,8 @@ class User extends Authenticatable
         's21plus_user_id',
         'department',
         'phone_number',
+        'bio',
+        'profile_photo_path',
         'signature_path',
         'is_active',
         'allowed_apps',
@@ -54,6 +57,13 @@ class User extends Authenticatable
     ];
 
     /**
+     * The accessors to append to the model array form.
+     *
+     * @var list<string>
+     */
+    protected $appends = ['profile_photo_url'];
+
+    /**
      * Get the attributes that should be cast.
      *
      * @return array<string, string>
@@ -66,6 +76,25 @@ class User extends Authenticatable
             'is_active' => 'boolean',
             'allowed_apps' => 'array',
         ];
+    }
+
+    public function getProfilePhotoUrlAttribute(): ?string
+    {
+        $path = trim((string) $this->profile_photo_path);
+
+        if ($path === '') {
+            return null;
+        }
+
+        if (
+            str_starts_with($path, 'http://')
+            || str_starts_with($path, 'https://')
+            || str_starts_with($path, '/')
+        ) {
+            return $path;
+        }
+
+        return Storage::disk('public')->url($path);
     }
 
     /**

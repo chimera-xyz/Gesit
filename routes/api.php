@@ -40,7 +40,7 @@ Route::middleware('web')->group(function () {
         // User Routes
         Route::get('/user', [UserController::class, 'currentUser']);
         Route::get('/user/profile', [UserController::class, 'profile']);
-        Route::put('/user/profile', [UserController::class, 'update']);
+        Route::match(['put', 'post'], '/user/profile', [UserController::class, 'update']);
         Route::put('/user/change-password', [UserController::class, 'changePassword']);
         Route::get('/users', [AdminUserController::class, 'index'])
             ->middleware('role:Admin');

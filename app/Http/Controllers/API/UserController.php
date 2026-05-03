@@ -8,6 +8,8 @@ use App\Support\PortalRegistry;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\ValidationException;
 
 class UserController extends Controller
 {
@@ -58,18 +60,48 @@ class UserController extends Controller
             $validated = $request->validate([
                 'name' => 'sometimes|string|max:255',
                 'email' => 'sometimes|email|unique:users,email,' . auth()->id(),
-                'employee_id' => 'sometimes|string|max:50|unique:users,employee_id,' . auth()->id(),
-                'department' => 'sometimes|string|max:255',
-                'phone_number' => 'sometimes|string|max:20',
+                'employee_id' => 'sometimes|nullable|string|max:50|unique:users,employee_id,' . auth()->id(),
+                'department' => 'sometimes|nullable|string|max:255',
+                'phone_number' => 'sometimes|nullable|string|max:20',
+                'bio' => 'sometimes|nullable|string|max:180',
+                'profile_photo' => 'sometimes|nullable|image|mimes:jpg,jpeg,png,webp|max:4096',
             ]);
 
             $user = auth()->user();
-            $user->update($validated);
+            unset($validated['profile_photo']);
+
+            foreach (['employee_id', 'department', 'phone_number', 'bio'] as $field) {
+                if (! array_key_exists($field, $validated)) {
+                    continue;
+                }
+
+                $normalized = trim((string) $validated[$field]);
+                $validated[$field] = $normalized === '' ? null : $normalized;
+            }
+
+            if ($request->hasFile('profile_photo')) {
+                $previousPhotoPath = trim((string) $user->profile_photo_path);
+                $validated['profile_photo_path'] = $request
+                    ->file('profile_photo')
+                    ->store('profile-photos', 'public');
+
+                if ($previousPhotoPath !== '') {
+                    Storage::disk('public')->delete($previousPhotoPath);
+                }
+            }
+
+            if ($validated !== []) {
+                $user->update($validated);
+            }
+
+            $user->refresh();
 
             return response()->json([
                 'success' => true,
-                'user' => $user,
+                ...$this->portalRegistry->authPayloadFor($user),
             ]);
+        } catch (ValidationException $e) {
+            throw $e;
         } catch (\Exception $e) {
             Log::error('Update Profile Error: ' . $e->getMessage());
             return response()->json(['error' => $e->getMessage()], 500);
